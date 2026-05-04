@@ -5,7 +5,7 @@ const OpenAI = require("openai");
 const db = require("./database");
 
 // =============================
-// CONFIG
+// CLIENT
 // =============================
 const client = new Client({
     intents: [
@@ -27,31 +27,33 @@ const memory = new Map();
 const cooldown = new Set();
 
 // =============================
-// LOCK CHANNEL (NEW)
+// CHANNEL LOCK
 // =============================
 const AI_CHANNEL_NAME = "⌊📝⌉-thai-airways-ai";
 
 // =============================
-// SYSTEM PROMPT (ANTI-MUT)
+// SYSTEM (CUSTOMER SERVICE)
 // =============================
 const SYSTEM = `
-You are Thai Airways Roblox Airline AI.
+You are Thai Airways Roblox Customer Service AI.
 
-⚠️ STRICT RULES:
-- ONLY use flight data provided
-- NEVER invent flights
-- NEVER guess
-- If not found → say "No flight available"
-- No hallucination allowed
+ROLE:
+- You are NOT HR anymore
+- You are CUSTOMER SERVICE agent
+- Your job is to help passengers, users, and applicants
 
-You are HR + Airline assistant only.
+RULES:
+- Be polite, helpful, friendly
+- Do not invent flight data
+- Use only provided database
+- If unknown → suggest contact support
 `;
 
 // =============================
-// BOT READY
+// READY
 // =============================
 client.once("ready", () => {
-    console.log("🤖 Bot online:", client.user.tag);
+    console.log("🤖 Customer Service AI Online");
 });
 
 // =============================
@@ -61,11 +63,9 @@ client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
 
     // =============================
-    // LOCK CHANNEL (IMPORTANT)
+    // LOCK CHANNEL
     // =============================
-    if (msg.channel.name !== AI_CHANNEL_NAME) {
-        return; // เงียบทุกช่องอื่น
-    }
+    if (msg.channel.name !== AI_CHANNEL_NAME) return;
 
     // =============================
     // COOLDOWN
@@ -77,8 +77,10 @@ client.on("messageCreate", async (msg) => {
     cooldown.add(msg.author.id);
     setTimeout(() => cooldown.delete(msg.author.id), 10000);
 
+    const text = msg.content.toLowerCase();
+
     // =============================
-    // LOAD DATABASE
+    // FLIGHT DATA
     // =============================
     const flights = db.getFlights();
     const info = db.getInfo();
@@ -91,7 +93,65 @@ client.on("messageCreate", async (msg) => {
 
     const infoText = info.length
         ? info.map(i => `${i.key}: ${i.value}`).join("\n")
-        : "NO INFO DATA";
+        : "NO INFO";
+
+    // =============================
+    // 🎯 1. AUTO JOB / APPLY DETECTION
+    // =============================
+    const jobKeywords = [
+        "สมัคร", "สมัครงาน", "อยากทำงาน", "อยากเป็นนักบิน",
+        "อยากเป็นพนักงาน", "pilot", "crew", "job", "work"
+    ];
+
+    const isJob = jobKeywords.some(k => text.includes(k));
+
+    if (isJob) {
+        return msg.reply(`
+✈️ สวัสดีครับ ยินดีต้อนรับสู่ระบบสมัครงาน Thai Airways Roblox
+
+คุณสามารถสมัครงานได้ที่:
+👉 https://recruitment.thai-airways.pattaramet.dev/
+
+📌 ขั้นตอนการสมัคร:
+1. กรอกใบสมัครออนไลน์
+2. รอการตรวจสอบจากฝ่าย HR
+3. เข้ารับการอบรม
+4. ประกาศผลการคัดเลือก
+
+หากมีคำถามเพิ่มเติมสามารถสอบถามได้เลยครับ 😊
+        `);
+    }
+
+    // =============================
+    // 🎫 2. TICKET AUTO SYSTEM
+    // =============================
+    const isTicket = msg.channel.name.startsWith("ticket");
+
+    const ticketKeywords = [
+        "royal silk",
+        "royal first",
+        "ยศ",
+        "ซื้อ",
+        "purchase",
+        "payment",
+        "รับยศ"
+    ];
+
+    const isTicketMsg = ticketKeywords.some(k => text.includes(k));
+
+    if (isTicket && isTicketMsg) {
+        return msg.reply(`
+🙏 ขอบคุณสำหรับการติดต่อฝ่ายบริการลูกค้า Thai Airways Roblox
+
+เพื่อให้เจ้าหน้าที่ดำเนินการได้เร็วที่สุด กรุณาส่งข้อมูลดังนี้:
+
+1️⃣ หลักฐานการซื้อ (Screenshot / Receipt)
+2️⃣ ชื่อผู้ใช้ Roblox
+
+📌 หลังจากได้รับข้อมูลครบถ้วนแล้ว
+เจ้าหน้าที่จะทำการตรวจสอบและดำเนินการให้โดยเร็วที่สุดครับ ✈️
+        `);
+    }
 
     // =============================
     // MEMORY
@@ -119,7 +179,7 @@ client.on("messageCreate", async (msg) => {
                     role: "system",
                     content: SYSTEM + `
 
-FLIGHTS (REAL ONLY):
+FLIGHTS:
 ${flightText}
 
 INFO:
@@ -128,28 +188,12 @@ ${infoText}
                 },
                 ...history
             ],
-            temperature: 0.3,
+            temperature: 0.4,
             max_tokens: 500
         });
 
-        let reply = res.choices[0].message.content;
+        const reply = res.choices[0].message.content;
 
-        // =============================
-        // ANTI HALLUCINATION FILTER
-        // =============================
-        const fakeFlightPattern = /TG\s?\d{2,4}/i;
-
-        const validFlight = flights.some(f =>
-            reply.includes(f.id)
-        );
-
-        if (fakeFlightPattern.test(reply) && !validFlight) {
-            return msg.reply("❌ AI พยายามสร้างข้อมูลเที่ยวบินเอง (ไม่อนุญาต)");
-        }
-
-        // =============================
-        // SAVE MEMORY
-        // =============================
         history.push({
             role: "assistant",
             content: reply
@@ -157,18 +201,13 @@ ${infoText}
 
         memory.set(msg.author.id, history);
 
-        // =============================
-        // SEND REPLY
-        // =============================
         msg.reply(reply);
 
     } catch (err) {
         console.log(err);
-        msg.reply("❌ ระบบ AI ขัดข้อง");
+        msg.reply("❌ ระบบขัดข้อง กรุณาลองใหม่");
     }
 });
 
-// =============================
-// LOGIN
 // =============================
 client.login(process.env.DISCORD_TOKEN);
