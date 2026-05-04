@@ -5,27 +5,26 @@ const OpenAI = require("openai");
 const express = require("express");
 
 // ----------------------
-// เช็ค Environment Variables
+// ENV CHECK
 // ----------------------
 console.log("DISCORD_TOKEN Exists:", !!process.env.DISCORD_TOKEN);
 console.log("GROQ_API_KEY Exists:", !!process.env.GROQ_API_KEY);
 
-// ถ้าไม่มี key ให้หยุดทันที
 if (!process.env.DISCORD_TOKEN) {
-  throw new Error("DISCORD_TOKEN ไม่พบใน Environment Variables");
+  throw new Error("DISCORD_TOKEN ไม่พบ");
 }
 
 if (!process.env.GROQ_API_KEY) {
-  throw new Error("GROQ_API_KEY ไม่พบใน Environment Variables");
+  throw new Error("GROQ_API_KEY ไม่พบ");
 }
 
 // ----------------------
-// Express Server (กัน host บางเจ้าปิด app)
+// EXPRESS SERVER
 // ----------------------
 const app = express();
 
 app.get("/", (req, res) => {
-  res.send("Thai Airways AI Bot is running");
+  res.send("Thai Airways AI Bot Running");
 });
 
 const PORT = process.env.PORT || 3000;
@@ -35,7 +34,7 @@ app.listen(PORT, () => {
 });
 
 // ----------------------
-// Discord Client
+// DISCORD CLIENT
 // ----------------------
 const client = new Client({
   intents: [
@@ -46,7 +45,7 @@ const client = new Client({
 });
 
 // ----------------------
-// Groq AI
+// GROQ AI
 // ----------------------
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
@@ -54,81 +53,160 @@ const groq = new OpenAI({
 });
 
 // ----------------------
-// Bot Ready
+// COOLDOWN SYSTEM
+// ----------------------
+const cooldown = new Set();
+
+// ----------------------
+// READY
 // ----------------------
 client.once("clientReady", () => {
   console.log(`Bot online: ${client.user.tag}`);
 });
 
 // ----------------------
-// Message Event
+// MESSAGE EVENT
 // ----------------------
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
   const text = message.content.toLowerCase();
 
-  const keywords = [
-    "สมัคร",
-    "สมัครงาน",
-    "นักบิน",
-    "ลูกเรือ",
-    "พนักงาน",
-    "hr",
-    "career",
-    "apply"
+  const channelName = message.channel.name.toLowerCase();
+
+  // ==========================
+  // TICKET SYSTEM
+  // ==========================
+  const isTicketChannel =
+    channelName.includes("ticket");
+
+  if (
+    isTicketChannel &&
+    (
+      text.includes("royal silk") ||
+      text.includes("royal first") ||
+      text.includes("rank") ||
+      text.includes("ยศ") ||
+      text.includes("ซื้อ") ||
+      text.includes("purchase")
+    )
+  ) {
+
+    const isEnglish = /[a-z]/.test(text);
+
+    if (isEnglish) {
+      return message.reply(`
+Hello and thank you for contacting Thai Airways.
+
+To verify your Royal Silk / Royal First rank, please provide:
+
+1. Proof of purchase
+2. Your Roblox username
+3. Purchase details/order info
+
+Our staff will assist you shortly.
+`);
+    }
+
+    return message.reply(`
+สวัสดีครับ ขอบคุณที่ติดต่อสายการบินไทย
+
+สำหรับการรับยศ Royal Silk / Royal First กรุณาส่งข้อมูลดังนี้:
+
+1. หลักฐานการซื้อ
+2. ชื่อผู้ใช้ Roblox
+3. รายละเอียดคำสั่งซื้อ
+
+เจ้าหน้าที่จะดำเนินการให้โดยเร็วที่สุดครับ
+`);
+  }
+
+  // ==========================
+  // FAQ CHANNEL ONLY
+  // ==========================
+  const allowedChannels = [
+    "faq",
+    "สอบถาม",
+    "questions"
   ];
 
-  const shouldReply = keywords.some(word =>
-    text.includes(word)
+  const canUseAI = allowedChannels.some(name =>
+    channelName.includes(name)
   );
 
-  if (!shouldReply) return;
+  if (!canUseAI) return;
+
+  // ==========================
+  // COOLDOWN กัน spam
+  // ==========================
+  if (cooldown.has(message.author.id)) {
+    return;
+  }
+
+  cooldown.add(message.author.id);
+
+  setTimeout(() => {
+    cooldown.delete(message.author.id);
+  }, 10000);
 
   try {
     await message.channel.sendTyping();
 
-    const completion = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages: [
-        {
-          role: "system",
-          content: `
-คุณคือแอดมินของสายการบินไทยใน Roblox
+    const completion =
+      await groq.chat.completions.create({
+        model: "llama-3.1-8b-instant",
+        messages: [
+          {
+            role: "system",
+            content: `
+You are an official Thai Airways Roblox assistant.
 
-ข้อมูลบริษัท:
-- สมัครงาน: https://yourwebsite.com
-- ฝึกลูกเรือทุกวันเสาร์
-- ติดต่อ HR ผ่าน Discord
-- รับนักบินอายุ 15+
-- ต้องตอบสุภาพ เป็นกันเอง และเหมือนแอดมินจริง
+IMPORTANT:
+- Understand typo
+- Understand incomplete sentences
+- Understand slang
+- Understand Thai and English
+- Reply in the same language as user
 
-ถ้าไม่รู้คำตอบ ให้แนะนำติดต่อ HR
+Company Info:
+- Pilot applications available
+- Cabin crew training every Saturday
+- HR available in Discord
+- Royal Silk available
+- Royal First available
+- Website: https://recruitment.thai-airways.pattaramet.dev/
+
+If user asks unclear questions:
+Politely ask for more details.
+
+If user asks something outside company scope:
+Tell them to contact HR.
 `
-        },
-        {
-          role: "user",
-          content: message.content
-        }
-      ],
-      temperature: 0.7
-    });
+          },
+          {
+            role: "user",
+            content: message.content
+          }
+        ],
+        temperature: 0.7
+      });
 
     const reply =
       completion.choices[0]?.message?.content ||
-      "ขออภัย ไม่สามารถตอบได้ในขณะนี้";
+      "ขออภัย ระบบไม่สามารถตอบได้ในขณะนี้";
 
     await message.reply(reply);
 
   } catch (error) {
-    console.error("AI Error:", error.message);
+    console.error(error.message);
+
     await message.reply(
-      "ขออภัย ระบบ AI มีปัญหาชั่วคราว กรุณาติดต่อ HR ครับ"
+      "ขออภัย ระบบ AI มีปัญหาชั่วคราว กรุณาติดต่อ HR"
     );
   }
 });
 
 // ----------------------
-// Login Discord
+// LOGIN
 // ----------------------
 client.login(process.env.DISCORD_TOKEN);
