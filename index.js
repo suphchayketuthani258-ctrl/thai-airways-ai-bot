@@ -3,19 +3,35 @@ require("dotenv").config();
 const { Client, GatewayIntentBits } = require("discord.js");
 const OpenAI = require("openai");
 const express = require("express");
-const fs = require("fs");
-const path = require("path");
-const stringSimilarity = require("string-similarity");
 
 // =============================
-// EXPRESS
+// ENV CHECK
+// =============================
+if (!process.env.DISCORD_TOKEN) {
+    throw new Error("ไม่พบ DISCORD_TOKEN");
+}
+
+if (!process.env.GROQ_API_KEY) {
+    throw new Error("ไม่พบ GROQ_API_KEY");
+}
+
+// =============================
+// EXPRESS SERVER (กันบอทดับบน hosting)
 // =============================
 const app = express();
-app.get("/", (_, res) => res.send("AI System Running"));
-app.listen(process.env.PORT || 3000);
+
+app.get("/", (req, res) => {
+    res.send("Thai Airways AI Bot Running");
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`Web server running on port ${PORT}`);
+});
 
 // =============================
-// DISCORD
+// DISCORD CLIENT
 // =============================
 const client = new Client({
     intents: [
@@ -26,7 +42,7 @@ const client = new Client({
 });
 
 // =============================
-// AI
+// GROQ AI
 // =============================
 const groq = new OpenAI({
     apiKey: process.env.GROQ_API_KEY,
@@ -34,254 +50,248 @@ const groq = new OpenAI({
 });
 
 // =============================
-// AUTO CREATE FILE SYSTEM (FIX MAIN ERROR)
+// COOLDOWN SYSTEM
 // =============================
-function ensureFile(filePath, fallback) {
-    const dir = path.dirname(filePath);
-
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
-
-    if (!fs.existsSync(filePath)) {
-        fs.writeFileSync(filePath, JSON.stringify(fallback, null, 2));
-    }
-}
-
-// CREATE ALL FILES SAFE
-ensureFile("./data/knowledge.json", []);
-ensureFile("./data/flights.json", []);
-ensureFile("./data/benefits.json", []);
-ensureFile("./data/memory.json", {});
-
-// =============================
-// DB
-// =============================
-const DB = {
-    kb: [],
-    flights: [],
-    benefits: [],
-    memory: {}
-};
-
-// =============================
-// SAFE READ
-// =============================
-function safeRead(file, fallback) {
-    try {
-        return JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
-        return fallback;
-    }
-}
-
-// =============================
-// LOAD DB
-// =============================
-function loadDB() {
-    DB.kb = safeRead("./data/knowledge.json", []);
-    DB.flights = safeRead("./data/flights.json", []);
-    DB.benefits = safeRead("./data/benefits.json", []);
-    DB.memory = safeRead("./data/memory.json", {});
-}
-
-function saveMemory() {
-    fs.writeFileSync("./data/memory.json", JSON.stringify(DB.memory, null, 2));
-}
-
-loadDB();
-setInterval(loadDB, 30000);
-
-// =============================
-// MEMORY
-// =============================
-function remember(userId, key, value) {
-    if (!DB.memory[userId]) DB.memory[userId] = {};
-    DB.memory[userId][key] = value;
-    saveMemory();
-}
-
-function recall(userId, key) {
-    return DB.memory[userId]?.[key];
-}
-
-// =============================
-// TIME
-// =============================
-function getTime() {
-    const now = new Date();
-
-    return {
-        thailand: new Intl.DateTimeFormat("th-TH", {
-            timeZone: "Asia/Bangkok",
-            dateStyle: "full",
-            timeStyle: "medium"
-        }).format(now)
-    };
-}
-
-// =============================
-// INTENT DETECTION
-// =============================
-function detectIntent(text) {
-    const t = text.toLowerCase();
-
-    const map = {
-        job: ["สมัคร", "งาน", "pilot", "crew", "แอร์", "นักบิน", "hr"],
-        flight: ["เที่ยวบิน", "flight", "บิน", "tg", "วันนี้", "พรุ่งนี้"],
-        benefit: ["royal", "สิทธิ", "benefit", "สวัสดิการ"],
-        time: ["เวลา", "กี่โมง", "date"]
-    };
-
-    for (const k in map) {
-        if (map[k].some(w => t.includes(w))) return k;
-    }
-
-    return "ai";
-}
-
-// =============================
-// KB SEARCH
-// =============================
-function findKB(text) {
-    if (!DB.kb.length) return null;
-
-    const keys = DB.kb.map(i => i.key);
-    const match = stringSimilarity.findBestMatch(text.toLowerCase(), keys);
-
-    if (match.bestMatch.rating < 0.4) return null;
-
-    return DB.kb.find(i => i.key === match.bestMatch.target);
-}
-
-// =============================
-// FLIGHT SEARCH (SAFE)
-// =============================
-function findFlights(text) {
-    const today = new Date().toISOString().split("T")[0];
-
-    if (text.includes("วันนี้")) {
-        return DB.flights.filter(f => f.date === today);
-    }
-
-    if (text.includes("พรุ่งนี้")) {
-        const d = new Date();
-        d.setDate(d.getDate() + 1);
-        const tmr = d.toISOString().split("T")[0];
-        return DB.flights.filter(f => f.date === tmr);
-    }
-
-    return DB.flights.filter(f =>
-        text.includes(f.code?.toLowerCase()) ||
-        text.includes(f.route?.toLowerCase()) ||
-        text.includes(f.date)
-    );
-}
-
-// =============================
-// CHANNEL LOCK
-// =============================
-const AI_CHANNEL = "⌊📝⌉-thai-airways-ai";
+const cooldown = new Set();
 
 // =============================
 // READY
 // =============================
 client.once("ready", () => {
-    console.log("AI READY:", client.user.tag);
+    console.log(`✅ Bot online: ${client.user.tag}`);
 });
 
 // =============================
-// MESSAGE
+// MESSAGE EVENT
 // =============================
-client.on("messageCreate", async (msg) => {
-    if (msg.author.bot) return;
+client.on("messageCreate", async (message) => {
+    if (message.author.bot) return;
 
-    const text = msg.content;
-    const t = text.toLowerCase();
-    const userId = msg.author.id;
+    const text = message.content.toLowerCase();
+    const channelName = message.channel.name.toLowerCase();
 
-    // =============================
-    // NAME MEMORY
-    // =============================
-    if (t.includes("ผมชื่อ") || t.includes("ฉันชื่อ")) {
-        const name = text.split("ชื่อ")[1]?.trim();
-        if (name) {
-            remember(userId, "name", name);
-            return msg.reply(`รับทราบครับคุณ ${name}`);
-        }
-    }
+    // =====================================
+    // JOB APPLICATION AUTO REPLY
+    // =====================================
+    const jobKeywords = [
+        "สมัคร",
+        "สมัครงาน",
+        "งาน",
+        "career",
+        "job",
+        "apply",
+        "pilot",
+        "crew",
+        "hr",
+        "นักบิน",
+        "ลูกเรือ",
+        "พนักงาน"
+    ];
 
-    // =============================
-    // JOB AUTO (ALL CHANNELS)
-    // =============================
-    if (["สมัคร", "งาน", "pilot", "crew", "นักบิน", "แอร์"].some(w => t.includes(w))) {
-        return msg.reply(`
-✈️ สมัครงาน Thai Airways Roblox
+    const askingJob = jobKeywords.some(word => text.includes(word));
 
+    if (askingJob) {
+        const isEnglish = /[a-z]/.test(text);
+
+        if (isEnglish) {
+            return message.reply(`
+Hello!
+
+You can apply through our official website:
 https://recruitment.thai-airways.pattaramet.dev/
 
-1. สมัคร
+Application steps:
+1. Submit application
+2. HR review
+3. Training/interview
+4. Receive rank if accepted
+
+For more info contact HR.
+`);
+        }
+
+        return message.reply(`
+สวัสดีครับ
+
+สามารถสมัครงานผ่านเว็บไซต์ทางการได้ที่:
+https://recruitment.thai-airways.pattaramet.dev/
+
+ขั้นตอน:
+1. ส่งใบสมัคร
 2. HR ตรวจสอบ
-3. สัมภาษณ์
-4. ฝึกงาน
+3. ฝึกอบรม/สัมภาษณ์
+4. รับยศหากผ่าน
+
+สอบถามเพิ่มเติมติดต่อ HR ได้เลยครับ
 `);
     }
 
-    // =============================
-    // CHANNEL LOCK
-    // =============================
-    if (msg.channel.name !== AI_CHANNEL) return;
+    // =====================================
+    // ROYAL SILK / ROYAL FIRST TICKET SYSTEM
+    // =====================================
+    const isTicketChannel = channelName.includes("ticket");
 
-    const intent = detectIntent(t);
-    const name = recall(userId, "name") || "unknown";
-    const time = getTime();
+    const ticketKeywords = [
+        "royal silk",
+        "royal first",
+        "rank",
+        "ยศ",
+        "ซื้อ",
+        "purchase"
+    ];
 
-    let data = null;
+    const askingTicket = ticketKeywords.some(word =>
+        text.includes(word)
+    );
 
-    if (intent === "flight") data = findFlights(t);
-    if (intent === "benefit") data = DB.benefits.find(b => t.includes(b.key));
-    if (intent === "time") {
-        return msg.reply(`🇹🇭 เวลาไทย: ${time.thailand}`);
+    if (isTicketChannel && askingTicket) {
+        const isEnglish = /[a-z]/.test(text);
+
+        if (isEnglish) {
+            return message.reply(`
+Hello!
+
+For Royal Silk / Royal First verification please provide:
+
+1. Purchase proof
+2. Roblox username
+3. Order details
+
+Staff will assist you shortly.
+`);
+        }
+
+        return message.reply(`
+สวัสดีครับ
+
+สำหรับการรับยศ Royal Silk / Royal First กรุณาส่ง:
+
+1. หลักฐานการซื้อ
+2. ชื่อ Roblox
+3. รายละเอียดคำสั่งซื้อ
+
+เจ้าหน้าที่จะดำเนินการให้ครับ
+`);
     }
 
-    const kb = findKB(t);
+    // =====================================
+    // AI CHAT ONLY SPECIFIC CHANNEL
+    // =====================================
+    const aiChannelName = "⌊📝⌉-thai-airways-ai";
 
-    // =============================
-    // AI RESPONSE
-    // =============================
-    await msg.channel.sendTyping();
+    if (message.channel.name !== aiChannelName) {
+        return;
+    }
 
-    const res = await groq.chat.completions.create({
-        model: "llama-3.1-8b-instant",
-        temperature: 0.2,
-        messages: [
-            {
-                role: "system",
-                content: `
-You are Roblox Airline AI.
+    // =====================================
+    // COOLDOWN
+    // =====================================
+    if (cooldown.has(message.author.id)) {
+        return message.reply("กรุณารอ 10 วินาทีก่อนใช้งาน AI อีกครั้ง");
+    }
 
-RULES:
-- ONLY internal data
-- NEVER use real-world airline data
-- If no data → "ไม่มีข้อมูลในระบบ"
+    cooldown.add(message.author.id);
 
-USER: ${name}
+    setTimeout(() => {
+        cooldown.delete(message.author.id);
+    }, 10000);
 
-KB:
-${kb ? kb.answer : "NONE"}
+    try {
+        await message.channel.sendTyping();
 
-FLIGHTS:
-${data ? JSON.stringify(data) : "NONE"}
+        const completion = await groq.chat.completions.create({
+            model: "llama-3.1-8b-instant",
+            messages: [
+                {
+                    role: "system",
+                    content: `
+You are the official Thai Airways Roblox AI Assistant.
+
+Rules:
+- Understand Thai and English
+- Understand typos
+- Reply in same language as user
+- Be professional
+- Help users clearly
+
+COMPANY INFO:
+- Recruitment website:
+https://recruitment.thai-airways.pattaramet.dev/
+
+- Pilot applications available
+- Cabin crew training every Saturday
+- HR support available
+- Royal Silk available
+- Royal First available
+
+EXECUTIVE TEAM:
+
+Fino / Fino251217
+- President of Thai Airways Roblox
+- Chief Human Resources Officer
+- Co-founder
+- Oversees the entire organization
+- Known as a good leader
+
+ฟิโน / Fino251217
+- ประธานบริหาร
+- ประธานฝ่ายทรัพยากรบุคคล
+- ผู้ร่วมก่อตั้ง
+
+--------------------------------
+
+papangkor559
+- Chief Financial Officer
+- Chief Commercial Officer
+
+ภาษาไทย:
+- ประธานเจ้าหน้าที่สายการเงินการบัญชี
+- ประธานเจ้าหน้าที่สายการพาณิชย์
+
+--------------------------------
+
+TH3JJ_TH
+- Director of Digital Center
+
+ภาษาไทย:
+- ผู้อำนวยการศูนย์ดิจิตอลการบินไทย
+
+--------------------------------
+
+99KLSH
+- Director of Inflight Operations
+- Director of Ground Services
+
+ภาษาไทย:
+- ผู้อำนวยการฝ่ายปฏิบัติการบนเครื่องบิน
+- ผู้อำนวยการฝ่ายบริการภาคพื้นดิน
+
+If you don't know something:
+Tell users to contact HR.
 `
-            },
-            {
-                role: "user",
-                content: text
-            }
-        ]
-    });
+                },
+                {
+                    role: "user",
+                    content: message.content
+                }
+            ],
+            temperature: 0.7,
+            max_tokens: 500
+        });
 
-    msg.reply(res.choices[0]?.message?.content || "ไม่มีข้อมูล");
+        const reply =
+            completion.choices[0]?.message?.content ||
+            "ขออภัย ระบบไม่สามารถตอบได้ในขณะนี้";
+
+        await message.reply(reply);
+
+    } catch (error) {
+        console.error(error);
+
+        await message.reply(
+            "ขออภัย ระบบ AI ขัดข้องชั่วคราว กรุณาติดต่อ HR"
+        );
+    }
 });
 
 // =============================
