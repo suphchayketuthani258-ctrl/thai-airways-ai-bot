@@ -7,33 +7,14 @@ const fs = require("fs");
 const stringSimilarity = require("string-similarity");
 
 // =============================
-// ENV CHECK
-// =============================
-if (!process.env.DISCORD_TOKEN) {
-    throw new Error("ไม่พบ DISCORD_TOKEN");
-}
-
-if (!process.env.GROQ_API_KEY) {
-    throw new Error("ไม่พบ GROQ_API_KEY");
-}
-
-// =============================
-// EXPRESS SERVER
+// SERVER
 // =============================
 const app = express();
-
-app.get("/", (req, res) => {
-    res.send("Thai Airways AI Bot Running");
-});
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-    console.log(`Web server running on port ${PORT}`);
-});
+app.get("/", (_, res) => res.send("Roblox Airline AI Online"));
+app.listen(process.env.PORT || 3000);
 
 // =============================
-// DISCORD CLIENT
+// DISCORD
 // =============================
 const client = new Client({
     intents: [
@@ -44,7 +25,7 @@ const client = new Client({
 });
 
 // =============================
-// GROQ AI
+// AI
 // =============================
 const groq = new OpenAI({
     apiKey: process.env.GROQ_API_KEY,
@@ -52,237 +33,249 @@ const groq = new OpenAI({
 });
 
 // =============================
-// COOLDOWN
+// DATABASE
 // =============================
-const cooldown = new Set();
+const DB = {
+    kb: [],
+    flights: [],
+    benefits: [],
+    memory: {}
+};
 
-// =============================
-// =============================
-// KNOWLEDGE BASE
-// =============================
-let kbCache = [];
+function loadDB() {
+    DB.kb = JSON.parse(fs.readFileSync("./data/knowledge.json", "utf8") || "[]");
+    DB.flights = JSON.parse(fs.readFileSync("./data/flights.json", "utf8") || "[]");
+    DB.benefits = JSON.parse(fs.readFileSync("./data/benefits.json", "utf8") || "[]");
 
-function loadKB() {
     try {
-        kbCache = JSON.parse(fs.readFileSync("./knowledge.json", "utf8"));
+        DB.memory = JSON.parse(fs.readFileSync("./data/memory.json", "utf8"));
     } catch {
-        kbCache = [];
-    }
-}
-
-function smartFind(text) {
-    if (!kbCache.length) return null;
-
-    const keys = kbCache.map(i => i.key);
-    const match = stringSimilarity.findBestMatch(text.toLowerCase(), keys);
-
-    if (match.bestMatch.rating < 0.4) return null;
-
-    return kbCache.find(i => i.key === match.bestMatch.target);
-}
-
-// =============================
-// USER MEMORY
-// =============================
-let memory = {};
-
-function loadMemory() {
-    try {
-        memory = JSON.parse(fs.readFileSync("./memory.json", "utf8"));
-    } catch {
-        memory = {};
+        DB.memory = {};
     }
 }
 
 function saveMemory() {
-    fs.writeFileSync("./memory.json", JSON.stringify(memory, null, 2));
+    fs.writeFileSync("./data/memory.json", JSON.stringify(DB.memory, null, 2));
 }
 
+loadDB();
+setInterval(loadDB, 30000);
+
+// =============================
+// MEMORY SYSTEM
+// =============================
 function remember(userId, key, value) {
-    if (!memory[userId]) memory[userId] = {};
-    memory[userId][key] = value;
+    if (!DB.memory[userId]) DB.memory[userId] = {};
+    DB.memory[userId][key] = value;
     saveMemory();
 }
 
 function recall(userId, key) {
-    return memory[userId]?.[key] || null;
+    return DB.memory[userId]?.[key];
 }
 
 // =============================
-// SAFETY (FLIGHT GUARD)
+// TIME SYSTEM (TH + GLOBAL)
 // =============================
-const STRICT_TOPICS = [
-    "เที่ยวบิน",
-    "flight",
-    "flight number",
-    "schedule",
-    "departure",
-    "arrival",
-    "เวลา"
-];
+function getTime() {
+    const now = new Date();
 
-function isStrictQuery(text) {
-    return STRICT_TOPICS.some(w => text.toLowerCase().includes(w));
+    return {
+        thailand: new Intl.DateTimeFormat("th-TH", {
+            timeZone: "Asia/Bangkok",
+            dateStyle: "full",
+            timeStyle: "medium"
+        }).format(now),
+        japan: new Intl.DateTimeFormat("ja-JP", {
+            timeZone: "Asia/Tokyo",
+            dateStyle: "full",
+            timeStyle: "medium"
+        }).format(now),
+        utc: now.toUTCString()
+    };
 }
 
 // =============================
-// INIT LOAD
+// INTENT DETECTION (SMART FUZZY)
 // =============================
-loadKB();
-loadMemory();
+function detectIntent(text) {
+    const t = text.toLowerCase();
 
-setInterval(loadKB, 30000);
+    const map = {
+        job: ["สมัคร", "งาน", "pilot", "crew", "แอร์", "นักบิน", "hr", "career"],
+        flight: ["เที่ยวบิน", "flight", "บิน", "tg", "schedule", "วัน", "เวลา"],
+        benefit: ["royal", "สิทธิ", "benefit", "สวัสดิการ"],
+        time: ["เวลา", "time", "กี่โมง", "ประเทศ"]
+    };
+
+    for (const key in map) {
+        if (map[key].some(w => t.includes(w))) return key;
+    }
+
+    return "ai";
+}
+
+// =============================
+// KB SEARCH (FUZZY)
+// =============================
+function findKB(text) {
+    if (!DB.kb.length) return null;
+
+    const keys = DB.kb.map(i => i.key);
+    const match = stringSimilarity.findBestMatch(text.toLowerCase(), keys);
+
+    if (match.bestMatch.rating < 0.4) return null;
+
+    return DB.kb.find(i => i.key === match.bestMatch.target);
+}
+
+// =============================
+// FLIGHT SYSTEM (FULL LOGIC)
+// =============================
+function findFlights(text) {
+    const today = new Date().toISOString().split("T")[0];
+
+    if (text.includes("วันนี้")) {
+        return DB.flights.filter(f => f.date === today);
+    }
+
+    if (text.includes("พรุ่งนี้")) {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        const tmr = d.toISOString().split("T")[0];
+        return DB.flights.filter(f => f.date === tmr);
+    }
+
+    return DB.flights.filter(f =>
+        text.includes(f.code?.toLowerCase()) ||
+        text.includes(f.route?.toLowerCase()) ||
+        text.includes(f.date)
+    );
+}
+
+// =============================
+// GLOBAL JOB DETECTOR (ALL CHANNELS)
+// =============================
+function isJob(text) {
+    const t = text.toLowerCase();
+    return [
+        "สมัคร", "งาน", "pilot", "นักบิน",
+        "แอร์", "crew", "hr", "career"
+    ].some(w => t.includes(w));
+}
+
+// =============================
+// CHANNEL LOCK
+// =============================
+const AI_CHANNEL = "⌊📝⌉-thai-airways-ai";
 
 // =============================
 // READY
 // =============================
 client.once("ready", () => {
-    console.log(`✅ Bot online: ${client.user.tag}`);
+    console.log("AI READY:", client.user.tag);
 });
 
 // =============================
 // MESSAGE EVENT
 // =============================
-client.on("messageCreate", async (message) => {
-    if (message.author.bot) return;
+client.on("messageCreate", async (msg) => {
+    if (msg.author.bot) return;
 
-    const text = message.content.toLowerCase();
-    const userId = message.author.id;
-    const channelName = message.channel.name.toLowerCase();
+    const text = msg.content;
+    const t = text.toLowerCase();
+    const userId = msg.author.id;
 
     // =============================
-    // MEMORY (จำชื่อผู้ใช้)
+    // MEMORY NAME
     // =============================
-    if (text.includes("ผมชื่อ") || text.includes("ฉันชื่อ")) {
-        const name = message.content.split("ชื่อ")[1]?.trim();
+    if (t.includes("ผมชื่อ") || t.includes("ฉันชื่อ")) {
+        const name = text.split("ชื่อ")[1]?.trim();
         if (name) {
             remember(userId, "name", name);
-            return message.reply(`รับทราบครับ คุณ ${name}`);
+            return msg.reply(`รับทราบครับคุณ ${name}`);
         }
     }
 
     // =============================
-    // JOB AUTO REPLY (เดิม)
+    // JOB SYSTEM (GLOBAL)
     // =============================
-    const jobKeywords = [
-        "สมัคร", "สมัครงาน", "งาน", "career", "job",
-        "apply", "pilot", "crew", "hr", "นักบิน", "ลูกเรือ", "พนักงาน"
-    ];
+    if (isJob(t)) {
+        return msg.reply(`
+✈️ สมัครงาน Thai Airways Roblox
 
-    if (jobKeywords.some(w => text.includes(w))) {
-        const isEnglish = /[a-z]/.test(text);
+🔗 https://recruitment.thai-airways.pattaramet.dev/
 
-        if (isEnglish) {
-            return message.reply(`
-Hello!
-
-Apply here:
-https://recruitment.thai-airways.pattaramet.dev/
-
-Steps:
-1. Apply
-2. HR review
-3. Training
-4. Get rank
-`);
-        }
-
-        return message.reply(`
-สวัสดีครับ
-
-สมัครได้ที่:
-https://recruitment.thai-airways.pattaramet.dev/
+ขั้นตอน:
+1. สมัคร
+2. HR ตรวจสอบ
+3. สัมภาษณ์
+4. ฝึกงาน
+5. เข้าทำงาน
 `);
     }
 
     // =============================
-    // TICKET SYSTEM (เดิม)
+    // CHANNEL LOCK
     // =============================
-    const isTicketChannel = channelName.includes("ticket");
+    if (msg.channel.name !== AI_CHANNEL) return;
 
-    const ticketKeywords = [
-        "royal silk", "royal first", "rank", "ยศ", "ซื้อ", "purchase"
-    ];
+    const intent = detectIntent(t);
+    const name = recall(userId, "name") || "unknown";
+    const time = getTime();
 
-    if (isTicketChannel && ticketKeywords.some(w => text.includes(w))) {
-        return message.reply(`
-กรุณาส่ง:
-1. หลักฐานการซื้อ
-2. Roblox username
-3. รายละเอียด
+    let data = null;
+
+    if (intent === "flight") data = findFlights(t);
+    if (intent === "benefit") data = DB.benefits.find(b => t.includes(b.key));
+    if (intent === "time") {
+        return msg.reply(`
+🇹🇭 ไทย: ${time.thailand}
+🇯🇵 ญี่ปุ่น: ${time.japan}
+🌍 UTC: ${time.utc}
 `);
     }
 
-    // =============================
-    // AI CHANNEL ONLY
-    // =============================
-    const aiChannelName = "⌊📝⌉-thai-airways-ai";
-    if (message.channel.name !== aiChannelName) return;
+    const kb = findKB(t);
 
     // =============================
-    // COOLDOWN
+    // AI RESPONSE
     // =============================
-    if (cooldown.has(userId)) {
-        return message.reply("รอ 10 วินาที");
-    }
+    await msg.channel.sendTyping();
 
-    cooldown.add(userId);
-    setTimeout(() => cooldown.delete(userId), 10000);
+    const res = await groq.chat.completions.create({
+        model: "llama-3.1-8b-instant",
+        temperature: 0.2,
+        messages: [
+            {
+                role: "system",
+                content: `
+You are Roblox Airline AI System.
 
-    try {
-        await message.channel.sendTyping();
+RULES:
+- ONLY use internal database
+- NEVER use real-world airline data
+- NEVER mention Thai Airways real-world info
+- If no data → "ไม่มีข้อมูลในระบบ"
+- Keep responses short
 
-        const kb = smartFind(text);
-        const name = recall(userId, "name");
+USER: ${name}
 
-        // =============================
-        // SAFETY CHECK (FLIGHT GUARD)
-        // =============================
-        if (isStrictQuery(text) && !kb) {
-            return message.reply(
-                "ไม่มีข้อมูลเที่ยวบินในระบบ กรุณาติดต่อ HR เพื่อสอบถามข้อมูลที่ถูกต้อง"
-            );
-        }
+KB:
+${kb ? kb.answer : "NONE"}
 
-        const completion = await groq.chat.completions.create({
-            model: "llama-3.1-8b-instant",
-            temperature: 0.3,
-            max_tokens: 500,
-            messages: [
-                {
-                    role: "system",
-                    content: `
-You are Thai Airways Roblox AI Assistant.
-
-User name: ${name || "unknown"}
-
-⚠️ STRICT RULES:
-- NEVER invent flight numbers
-- NEVER invent schedules or times
-- ONLY use provided knowledge
-- If no data → say "ไม่มีข้อมูล กรุณาติดต่อ HR"
-
-Knowledge:
-${kb ? kb.answer : "NO DATA"}
+FLIGHT:
+${data ? JSON.stringify(data) : "NONE"}
 `
-                },
-                {
-                    role: "user",
-                    content: message.content
-                }
-            ]
-        });
+            },
+            {
+                role: "user",
+                content: text
+            }
+        ]
+    });
 
-        const reply =
-            completion.choices[0]?.message?.content ||
-            "ไม่มีข้อมูล กรุณาติดต่อ HR";
-
-        await message.reply(reply);
-
-    } catch (err) {
-        console.error(err);
-        await message.reply("ระบบขัดข้อง");
-    }
+    msg.reply(res.choices[0]?.message?.content || "ไม่มีข้อมูล");
 });
 
 // =============================

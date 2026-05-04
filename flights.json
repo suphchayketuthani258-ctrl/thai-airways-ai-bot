@@ -1,0 +1,20 @@
+[
+  {
+    "code": "TG101",
+    "date": "2026-05-05",
+    "time": "10:00",
+    "route": "Bangkok - Tokyo",
+    "aircraft": "B777-300ER",
+    "gate": "A1",
+    "status": "On Time"
+  },
+  {
+    "code": "TG202",
+    "date": "2026-05-06",
+    "time": "15:30",
+    "route": "Bangkok - Seoul",
+    "aircraft": "A350-900",
+    "gate": "B2",
+    "status": "Delayed"
+  }
+]
