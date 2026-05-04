@@ -4,6 +4,47 @@ const { Client, GatewayIntentBits } = require("discord.js");
 const OpenAI = require("openai");
 const db = require("./database");
 
+// =============================
+// 🌐 WEB SERVER
+// =============================
+const express = require("express");
+const app = express();
+
+app.use(express.json());
+app.use(express.static("public"));
+
+let trainingData = [];
+
+// API: GET flights
+app.get("/flights", (req, res) => {
+    res.json(db.getFlights());
+});
+
+// API: ADD flight
+app.post("/add-flight", (req, res) => {
+    const { from, to, time } = req.body;
+    db.addFlight(from, to, time);
+    res.sendStatus(200);
+});
+
+// API: TRAIN AI
+app.post("/train", (req, res) => {
+    trainingData.push(req.body.text);
+    res.sendStatus(200);
+});
+
+// API: GET TRAIN DATA
+app.get("/train", (req, res) => {
+    res.json(trainingData);
+});
+
+app.listen(3000, () => {
+    console.log("🌐 Web running on http://localhost:3000");
+});
+
+// =============================
+// 🤖 DISCORD BOT
+// =============================
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -17,17 +58,59 @@ const groq = new OpenAI({
     baseURL: "https://api.groq.com/openai/v1"
 });
 
+// =============================
+// 🧠 MEMORY + COOLDOWN
+// =============================
 const memory = new Map();
 const cooldown = new Set();
 
+// =============================
+// 🔒 SYSTEM (ANTI REAL-WORLD)
+// =============================
 const SYSTEM = `
-You are Thai Airways Roblox Customer Service AI.
+You are Thai Airways Roblox Customer Service AI (FICTIONAL SYSTEM).
+
+STRICT RULES:
+- You MUST NOT reference real-world airlines or Thai Airways.
+- You MUST NOT provide real flight schedules or real data.
+- You MUST NOT mention real websites.
+- Everything is fictional and stored in this system only.
+- If user asks about real-world info → say not available.
+
+Behavior:
+- Speak Thai politely
+- Keep answer short
+- Help about Roblox airline system only
 `;
 
+// =============================
+// 🛡 SANITIZE AI OUTPUT
+// =============================
+function sanitizeAI(text) {
+    const banned = [
+        "http", "www.", "thai airways", "การบินไทย",
+        "suvarnabhumi", "don mueang"
+    ];
+
+    const lower = text.toLowerCase();
+
+    if (banned.some(w => lower.includes(w))) {
+        return "⚠️ ระบบนี้เป็นระบบจำลอง ไม่สามารถให้ข้อมูลจริงได้";
+    }
+
+    return text;
+}
+
+// =============================
+// 🚀 READY
+// =============================
 client.once("ready", () => {
     console.log("🤖 AI ONLINE");
 });
 
+// =============================
+// 💬 MESSAGE HANDLER
+// =============================
 client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
 
@@ -35,19 +118,19 @@ client.on("messageCreate", async (msg) => {
     const text = msg.content.toLowerCase();
 
     // =============================
-    // LOCK CHANNEL
+    // LOCK CHANNEL (ยืดหยุ่นขึ้น)
     // =============================
-    if (channelName !== "⌊📝⌉-thai-airways-ai") return;
+    if (!channelName.includes("thai-airways-ai")) return;
 
     // =============================
     // COOLDOWN
     // =============================
     if (cooldown.has(msg.author.id)) {
-        return msg.reply("⏳ รอ 10 วิ");
+        return msg.reply("⏳ รอ 5 วินาที");
     }
 
     cooldown.add(msg.author.id);
-    setTimeout(() => cooldown.delete(msg.author.id), 10000);
+    setTimeout(() => cooldown.delete(msg.author.id), 5000);
 
     // =============================
     // DATABASE
@@ -55,13 +138,13 @@ client.on("messageCreate", async (msg) => {
     const flights = db.getFlights();
 
     const flightText = flights.length
-        ? flights.map(f =>
+        ? flights.slice(0, 10).map(f =>
             `${f.id}: ${f.from} → ${f.to} ${f.time}`
         ).join("\n")
         : "NO FLIGHTS";
 
     // =============================
-    // 🎫 TICKET FIX (NO SILENT BUG)
+    // 🎫 TICKET SYSTEM (เดิม)
     // =============================
     const isTicketChannel = channelName.includes("ticket");
 
@@ -70,13 +153,7 @@ client.on("messageCreate", async (msg) => {
         .replace(/rotal/g, "royal");
 
     const matchTicket =
-        normalized.includes("royal") ||
-        normalized.includes("silk") ||
-        normalized.includes("ยศ") ||
-        normalized.includes("ซื้อ") ||
-        normalized.includes("rank") ||
-        normalized.includes("claim") ||
-        normalized.includes("verify");
+        /royal|silk|rank|claim|verify|ซื้อ|ยศ/.test(normalized);
 
     if (isTicketChannel && matchTicket) {
         return msg.reply(`
@@ -91,12 +168,12 @@ client.on("messageCreate", async (msg) => {
     }
 
     // =============================
-    // MEMORY
+    // 🧠 MEMORY
     // =============================
     let history = memory.get(msg.author.id) || [];
 
     history.push({ role: "user", content: msg.content });
-    history = history.slice(-6);
+    history = history.slice(-10);
     memory.set(msg.author.id, history);
 
     try {
@@ -107,7 +184,12 @@ client.on("messageCreate", async (msg) => {
             messages: [
                 {
                     role: "system",
-                    content: SYSTEM + `
+                    content:
+                        SYSTEM +
+                        `
+
+TRAINING DATA:
+${trainingData.join("\n")}
 
 FLIGHTS:
 ${flightText}
@@ -119,7 +201,10 @@ ${flightText}
             max_tokens: 500
         });
 
-        const reply = res.choices[0].message.content;
+        let reply = res.choices[0].message.content;
+
+        // 🛡 sanitize
+        reply = sanitizeAI(reply);
 
         history.push({ role: "assistant", content: reply });
         memory.set(msg.author.id, history);
@@ -127,9 +212,12 @@ ${flightText}
         msg.reply(reply);
 
     } catch (err) {
-        console.log(err);
-        msg.reply("❌ error");
+        console.error(err);
+        msg.reply("❌ ระบบขัดข้อง กรุณาลองใหม่");
     }
 });
 
+// =============================
+// 🔑 LOGIN
+// =============================
 client.login(process.env.DISCORD_TOKEN);

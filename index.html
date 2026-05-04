@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>AI Control Panel</title>
+<link href="https://fonts.googleapis.com/css2?family=Kanit&display=swap" rel="stylesheet">
+<style>
+body {
+    font-family: 'Kanit', sans-serif;
+    background: #0f172a;
+    color: white;
+    margin: 0;
+}
+.container {
+    padding: 20px;
+}
+.card {
+    background: #1e293b;
+    padding: 20px;
+    border-radius: 16px;
+    margin-bottom: 20px;
+}
+input, button {
+    padding: 10px;
+    border-radius: 10px;
+    border: none;
+}
+button {
+    background: #38bdf8;
+    cursor: pointer;
+}
+.flight {
+    background: #334155;
+    padding: 10px;
+    margin: 5px 0;
+    border-radius: 10px;
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<h1>✈️ AI Dashboard</h1>
+
+<div class="card">
+<h2>➕ เพิ่มเที่ยวบิน (Fake Only)</h2>
+<input id="from" placeholder="From">
+<input id="to" placeholder="To">
+<input id="time" placeholder="Time">
+<button onclick="addFlight()">เพิ่ม</button>
+</div>
+
+<div class="card">
+<h2>📋 เที่ยวบิน</h2>
+<div id="flights"></div>
+</div>
+
+<div class="card">
+<h2>🧠 Train AI</h2>
+<textarea id="train" rows="4" style="width:100%"></textarea>
+<button onclick="trainAI()">บันทึก</button>
+</div>
+
+</div>
+
+<script>
+async function loadFlights() {
+    const res = await fetch('/flights');
+    const data = await res.json();
+
+    const div = document.getElementById("flights");
+    div.innerHTML = "";
+
+    data.forEach(f => {
+        div.innerHTML += `<div class="flight">
+            ${f.id}: ${f.from} → ${f.to} ${f.time}
+        </div>`;
+    });
+}
+
+async function addFlight() {
+    await fetch('/add-flight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            from: from.value,
+            to: to.value,
+            time: time.value
+        })
+    });
+    loadFlights();
+}
+
+async function trainAI() {
+    await fetch('/train', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            text: train.value
+        })
+    });
+    alert("Saved");
+}
+
+loadFlights();
+</script>
+
+</body>
+</html>
