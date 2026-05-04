@@ -16,16 +16,18 @@ if (!process.env.GROQ_API_KEY) {
 }
 
 // ----------------------
-// EXPRESS
+// EXPRESS SERVER
 // ----------------------
 const app = express();
 
 app.get("/", (req, res) => {
-  res.send("Bot Running");
+  res.send("Thai Airways AI Bot Running");
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("Web server running");
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Web server running on port ${PORT}`);
 });
 
 // ----------------------
@@ -40,18 +42,20 @@ const client = new Client({
 });
 
 // ----------------------
-// GROQ
+// GROQ AI
 // ----------------------
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
   baseURL: "https://api.groq.com/openai/v1"
 });
 
-// cooldown
+// ----------------------
+// COOLDOWN
+// ----------------------
 const cooldown = new Set();
 
 // ----------------------
-// READY
+// BOT READY
 // ----------------------
 client.once("clientReady", () => {
   console.log(`Bot online: ${client.user.tag}`);
@@ -66,41 +70,69 @@ client.on("messageCreate", async (message) => {
   const text = message.content.toLowerCase();
   const channelName = message.channel.name.toLowerCase();
 
-  // สมัครงาน
+  // =====================================
+  // JOB APPLICATION AUTO REPLY (ทุกห้อง)
+  // =====================================
   const jobKeywords = [
     "สมัคร",
     "สมัครงาน",
+    "งาน",
     "นักบิน",
     "ลูกเรือ",
     "พนักงาน",
     "apply",
+    "job",
     "pilot",
     "crew",
-    "job"
+    "career",
+    "hr"
   ];
 
-  if (jobKeywords.some(word => text.includes(word))) {
+  const askingJob = jobKeywords.some(word =>
+    text.includes(word)
+  );
+
+  if (askingJob) {
     const isEnglish = /[a-z]/.test(text);
 
     if (isEnglish) {
       return message.reply(`
-You can apply here:
+Hello!
+
+You can apply through our official website:
 https://recruitment.thai-airways.pattaramet.dev/
 
-Please contact HR for more details.
+Application process:
+1. Submit application
+2. HR review
+3. Training/interview
+4. Receive rank if accepted
+
+For more help, please contact HR.
 `);
     }
 
     return message.reply(`
-สามารถสมัครได้ที่:
+สวัสดีครับ
+
+สามารถสมัครงานผ่านเว็บไซต์ทางการได้ที่:
 https://recruitment.thai-airways.pattaramet.dev/
 
-หากต้องการข้อมูลเพิ่มเติม กรุณาติดต่อ HR
+ขั้นตอนสมัคร:
+1. ส่งใบสมัคร
+2. รอ HR ตรวจสอบ
+3. เข้าฝึก/สัมภาษณ์
+4. รับยศหากผ่าน
+
+หากต้องการข้อมูลเพิ่มเติมสามารถติดต่อ HR ได้เลยครับ
 `);
   }
 
-  // ticket royal
-  const isTicketChannel = channelName.includes("ticket");
+  // =====================================
+  // TICKET SYSTEM
+  // =====================================
+  const isTicketChannel =
+    channelName.includes("ticket");
 
   if (
     isTicketChannel &&
@@ -108,26 +140,55 @@ https://recruitment.thai-airways.pattaramet.dev/
       text.includes("royal silk") ||
       text.includes("royal first") ||
       text.includes("rank") ||
-      text.includes("ยศ")
+      text.includes("ยศ") ||
+      text.includes("ซื้อ") ||
+      text.includes("purchase")
     )
   ) {
+    const isEnglish = /[a-z]/.test(text);
+
+    if (isEnglish) {
+      return message.reply(`
+Hello!
+
+To verify your Royal Silk / Royal First rank, please provide:
+
+1. Proof of purchase
+2. Your Roblox username
+3. Order details
+
+Our staff will assist you shortly.
+`);
+    }
+
     return message.reply(`
-กรุณาส่ง:
+สวัสดีครับ
+
+สำหรับการรับยศ Royal Silk / Royal First กรุณาส่งข้อมูลดังนี้:
 
 1. หลักฐานการซื้อ
-2. Roblox Username
+2. ชื่อผู้ใช้ Roblox
 3. รายละเอียดคำสั่งซื้อ
 
-เจ้าหน้าที่จะช่วยตรวจสอบให้ครับ
+เจ้าหน้าที่จะดำเนินการให้ครับ
 `);
   }
 
-  // ต้อง mention bot ก่อนถาม AI
-  const botMentioned = message.mentions.has(client.user);
+  // =====================================
+  // AI CHAT ONLY IN SPECIFIC CHANNEL
+  // =====================================
+  const aiChannelName = "⌊📝⌉-thai-airwyas-ai";
 
-  if (!botMentioned) return;
+  if (message.channel.name !== aiChannelName) {
+    return;
+  }
 
-  if (cooldown.has(message.author.id)) return;
+  // =====================================
+  // COOLDOWN
+  // =====================================
+  if (cooldown.has(message.author.id)) {
+    return;
+  }
 
   cooldown.add(message.author.id);
 
@@ -136,10 +197,7 @@ https://recruitment.thai-airways.pattaramet.dev/
   }, 10000);
 
   try {
-    const cleanMessage = message.content
-      .replace(`<@${client.user.id}>`, "")
-      .replace(`<@!${client.user.id}>`, "")
-      .trim();
+    await message.channel.sendTyping();
 
     const completion =
       await groq.chat.completions.create({
@@ -148,29 +206,54 @@ https://recruitment.thai-airways.pattaramet.dev/
           {
             role: "system",
             content: `
-You are Thai Airways Roblox assistant.
-Reply in same language as user.
-Be helpful and professional.
+You are an official Thai Airways Roblox AI assistant.
+
+Rules:
+- Understand Thai and English
+- Understand typo
+- Understand incomplete sentences
+- Reply in same language as user
+- Be professional
+- Answer airline related questions clearly
+
+Company info:
+- Recruitment website:
+https://recruitment.thai-airways.pattaramet.dev/
+
+- Pilot applications available
+- Cabin crew training every Saturday
+- HR support available
+- Royal Silk available
+- Royal First available
+
+If you don't know answer:
+Tell user to contact HR.
 `
           },
           {
             role: "user",
-            content: cleanMessage
+            content: message.content
           }
-        ]
+        ],
+        temperature: 0.7
       });
 
     const reply =
       completion.choices[0]?.message?.content ||
-      "ไม่สามารถตอบได้ตอนนี้";
+      "ขออภัย ระบบไม่สามารถตอบได้ในขณะนี้";
 
     await message.reply(reply);
 
   } catch (error) {
-    console.log(error.message);
-    await message.reply("ระบบ AI ขัดข้องชั่วคราว");
+    console.error(error);
+
+    await message.reply(
+      "ขออภัย ระบบ AI มีปัญหาชั่วคราว กรุณาติดต่อ HR"
+    );
   }
 });
 
-// login
+// ----------------------
+// LOGIN
+// ----------------------
 client.login(process.env.DISCORD_TOKEN);
