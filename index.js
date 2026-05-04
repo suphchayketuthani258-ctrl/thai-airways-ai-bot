@@ -124,17 +124,7 @@ Our staff will assist you shortly.
   // ==========================
   // FAQ CHANNEL ONLY
   // ==========================
-  const allowedChannels = [
-    "faq",
-    "สอบถาม",
-    "questions"
-  ];
 
-  const canUseAI = allowedChannels.some(name =>
-    channelName.includes(name)
-  );
-
-  if (!canUseAI) return;
 
   // ==========================
   // COOLDOWN กัน spam
