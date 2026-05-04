@@ -8,18 +8,18 @@ const csv = require("csv-parser");
 const { Readable } = require("stream");
 
 // =========================
-// ENV CHECK (soft safe)
+// ENV CHECK
 // =========================
 if (!process.env.DISCORD_TOKEN) {
-    throw new Error("ไม่พบ DISCORD_TOKEN");
+    throw new Error("Missing DISCORD_TOKEN");
 }
 
 if (!process.env.GROQ_API_KEY) {
-    throw new Error("ไม่พบ GROQ_API_KEY");
+    throw new Error("Missing GROQ_API_KEY");
 }
 
 if (!process.env.GOOGLE_SHEET_URL) {
-    console.log("⚠️ ไม่มี GOOGLE_SHEET_URL -> ใช้ AI อย่างเดียว");
+    console.log("No sheet URL - AI only mode");
 }
 
 // =========================
@@ -28,13 +28,11 @@ if (!process.env.GOOGLE_SHEET_URL) {
 const app = express();
 
 app.get("/", (req, res) => {
-    res.send("Thai Airways AI Bot Running");
+    res.send("Roblox Thai Airways AI System Running");
 });
 
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-    console.log(`Web server running on port ${PORT}`);
+app.listen(process.env.PORT || 3000, () => {
+    console.log("Web server started");
 });
 
 // =========================
@@ -49,7 +47,7 @@ const client = new Client({
 });
 
 // =========================
-// GROQ AI
+// AI (GROQ)
 // =========================
 const groq = new OpenAI({
     apiKey: process.env.GROQ_API_KEY,
@@ -62,15 +60,13 @@ const groq = new OpenAI({
 const cooldown = new Set();
 
 // =========================
-// LOAD GOOGLE SHEET (SAFE)
+// LOAD GOOGLE SHEET (ROBLOX DATABASE)
 // =========================
 async function loadSheetData() {
     try {
         if (!process.env.GOOGLE_SHEET_URL) return [];
 
-        const response = await axios.get(
-            process.env.GOOGLE_SHEET_URL
-        );
+        const response = await axios.get(process.env.GOOGLE_SHEET_URL);
 
         const rows = [];
 
@@ -83,36 +79,30 @@ async function loadSheetData() {
         });
 
     } catch (err) {
-        console.log("Sheet load error:", err.message);
+        console.log("Sheet error:", err.message);
         return [];
     }
 }
 
 // =========================
-// FIND RELEVANT DATA (FIXED)
+// SEARCH ROBLOX DATABASE ONLY
 // =========================
-async function findRelevantInfo(question) {
+async function searchDatabase(question) {
     const data = await loadSheetData();
+    const q = question.toLowerCase();
 
-    const lowerQuestion = question.toLowerCase();
+    return data.filter(row => {
+        if (!row.keyword || !row.info) return false;
 
-    const matched = data.filter(row => {
-        if (!row.keyword) return false;
-        if (!row.info) return false;
-
-        return lowerQuestion.includes(
-            String(row.keyword).toLowerCase()
-        );
-    });
-
-    return matched.slice(0, 10);
+        return q.includes(String(row.keyword).toLowerCase());
+    }).slice(0, 10);
 }
 
 // =========================
-// READY EVENT (FIXED)
+// READY
 // =========================
 client.once("clientReady", () => {
-    console.log(`✅ Bot online: ${client.user.tag}`);
+    console.log(`Bot online: ${client.user.tag}`);
 });
 
 // =========================
@@ -122,54 +112,14 @@ client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
     const text = message.content.toLowerCase();
-    const channelName = message.channel.name.toLowerCase();
+    const channel = message.channel.name;
 
     // =========================
-    // JOB SYSTEM
-    // =========================
-    const jobKeywords = [
-        "สมัคร", "สมัครงาน", "งาน", "career", "job",
-        "apply", "pilot", "crew", "hr", "นักบิน", "ลูกเรือ"
-    ];
-
-    if (jobKeywords.some(w => text.includes(w))) {
-        return message.reply(`
-📌 สมัครงานการบินไทย Roblox
-
-https://recruitment.thai-airways.pattaramet.dev/
-
-ขั้นตอน:
-1. สมัคร
-2. HR ตรวจสอบ
-3. สัมภาษณ์
-4. รับยศ
-`);
-    }
-
-    // =========================
-    // TICKET SYSTEM
-    // =========================
-    if (
-        channelName.includes("ticket") &&
-        (text.includes("royal") || text.includes("ยศ") || text.includes("ซื้อ"))
-    ) {
-        return message.reply(`
-🎫 กรุณาส่งข้อมูล:
-
-1. หลักฐานการซื้อ
-2. Roblox username
-3. รายละเอียดคำสั่งซื้อ
-
-เจ้าหน้าที่จะตรวจสอบให้ครับ
-`);
-    }
-
-    // =========================
-    // AI CHANNEL ONLY
+    // ONLY AI CHANNEL
     // =========================
     const aiChannel = "⌊📝⌉-thai-airways-ai";
 
-    if (message.channel.name !== aiChannel) return;
+    if (channel !== aiChannel) return;
 
     // =========================
     // COOLDOWN
@@ -184,39 +134,53 @@ https://recruitment.thai-airways.pattaramet.dev/
     try {
         await message.channel.sendTyping();
 
-        const sheetData = await findRelevantInfo(message.content);
+        // =========================
+        // GET ROBLOX DATABASE
+        // =========================
+        const db = await searchDatabase(message.content);
 
         const context =
-            sheetData.length > 0
-                ? sheetData.map(r => `
-Category: ${r.category || "N/A"}
+            db.length > 0
+                ? db.map(r => `
+[ROBLOX DATABASE]
+Category: ${r.category || "Unknown"}
 Keyword: ${r.keyword}
 Info: ${r.info}
 `).join("\n")
-                : "No sheet data found";
+                : "No Roblox database info found";
 
+        // =========================
+        // AI PROMPT (ROBLOX ONLY RULE)
+        // =========================
         const completion = await groq.chat.completions.create({
             model: "llama-3.1-8b-instant",
             messages: [
                 {
                     role: "system",
                     content: `
-You are Thai Airways Roblox AI assistant.
+You are an AI assistant for a Roblox airline company only.
 
-Use this database when relevant:
+IMPORTANT RULES:
+- This is a Roblox airline world only
+- Do NOT mention real world airlines
+- Do NOT mention real people or external companies
+- Do NOT use outside knowledge
+- Only use provided database below
+- If no info found, say: "Please contact Roblox HR team"
 
+DATABASE:
 ${context}
 
-Executive info:
-- Fino: CEO, CHRO, Co-founder
-- papangkor559: CFO, CCO
-- TH3JJ_TH: Director Digital
-- 99KLSH: Director Operations
+Company structure exists only inside Roblox:
+- HR Team (Roblox)
+- Operations Team (Roblox)
+- Digital Center (Roblox)
+- Flight Crew Training System (Roblox)
 
-Rules:
-- Reply naturally
-- Use sheet if relevant
-- If no info → answer normally or say contact HR
+Tone:
+- Professional
+- Clear
+- Friendly
 `
                 },
                 {
@@ -224,18 +188,19 @@ Rules:
                     content: message.content
                 }
             ],
-            temperature: 0.7
+            temperature: 0.7,
+            max_tokens: 500
         });
 
         const reply =
             completion.choices[0]?.message?.content ||
-            "ขออภัย ระบบไม่สามารถตอบได้";
+            "ไม่สามารถตอบได้ กรุณาติดต่อ Roblox HR";
 
         await message.reply(reply);
 
     } catch (err) {
         console.error(err);
-        await message.reply("❌ ระบบ AI ขัดข้องชั่วคราว");
+        await message.reply("❌ ระบบ AI ขัดข้อง กรุณาลองใหม่");
     }
 });
 
