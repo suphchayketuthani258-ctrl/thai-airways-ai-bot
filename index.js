@@ -1,78 +1,67 @@
-require("dotenv").config();
-
-const { Client, GatewayIntentBits } = require("discord.js");
-const OpenAI = require("openai");
-const express = require("express");
-
-// ----------------------
-// ENV CHECK
-// ----------------------
-console.log("DISCORD_TOKEN Exists:", !!process.env.DISCORD_TOKEN);
-console.log("GROQ_API_KEY Exists:", !!process.env.GROQ_API_KEY);
-
-if (!process.env.DISCORD_TOKEN) {
-  throw new Error("DISCORD_TOKEN ไม่พบ");
-}
-
-if (!process.env.GROQ_API_KEY) {
-  throw new Error("GROQ_API_KEY ไม่พบ");
-}
-
-// ----------------------
-// EXPRESS SERVER
-// ----------------------
-const app = express();
-
-app.get("/", (req, res) => {
-  res.send("Thai Airways AI Bot Running");
-});
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`Web server running on port ${PORT}`);
-});
-
-// ----------------------
-// DISCORD CLIENT
-// ----------------------
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
-});
-
-// ----------------------
-// GROQ AI
-// ----------------------
-const groq = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: "https://api.groq.com/openai/v1"
-});
-
-// ----------------------
-// COOLDOWN SYSTEM
-// ----------------------
-const cooldown = new Set();
-
-// ----------------------
-// READY
-// ----------------------
-client.once("clientReady", () => {
-  console.log(`Bot online: ${client.user.tag}`);
-});
-
-// ----------------------
-// MESSAGE EVENT
-// ----------------------
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
   const text = message.content.toLowerCase();
-
   const channelName = message.channel.name.toLowerCase();
+
+  // ==========================
+  // JOB APPLICATION AUTO REPLY
+  // ตอบทุกห้อง
+  // ==========================
+  const jobKeywords = [
+    "สมัคร",
+    "สมัครงาน",
+    "งาน",
+    "นักบิน",
+    "ลูกเรือ",
+    "พนักงาน",
+    "apply",
+    "job",
+    "pilot",
+    "crew",
+    "career",
+    "hr"
+  ];
+
+  const askingJob = jobKeywords.some(word =>
+    text.includes(word)
+  );
+
+  if (askingJob) {
+    const isEnglish = /[a-z]/.test(text);
+
+    if (isEnglish) {
+      return message.reply(`
+Hello!
+
+You can apply through our official website:
+https://recruitment.thai-airways.pattaramet.dev/
+
+Application process:
+1. Submit application
+2. HR review
+3. Training/interview
+4. Receive rank if accepted
+
+For more help, please contact HR.
+`);
+    }
+
+    return message.reply(`
+สวัสดีครับ
+
+สามารถสมัครงานผ่านเว็บไซต์ทางการได้ที่:
+https://recruitment.thai-airways.pattaramet.dev/
+
+ขั้นตอนสมัคร:
+1. ส่งใบสมัคร
+2. รอ HR ตรวจสอบ
+3. เข้าฝึก/สัมภาษณ์
+4. รับยศหากผ่าน
+
+หากต้องการข้อมูลเพิ่มเติมสามารถติดต่อ HR ได้เลยครับ
+`);
+  }
 
   // ==========================
   // TICKET SYSTEM
@@ -122,9 +111,13 @@ Our staff will assist you shortly.
   }
 
   // ==========================
-  // FAQ CHANNEL ONLY
+  // AI ตอบเฉพาะตอน mention bot
   // ==========================
+  const botMentioned = message.mentions.has(client.user);
 
+  if (!botMentioned) {
+    return;
+  }
 
   // ==========================
   // COOLDOWN กัน spam
@@ -142,6 +135,11 @@ Our staff will assist you shortly.
   try {
     await message.channel.sendTyping();
 
+    const cleanMessage = message.content
+      .replace(`<@${client.user.id}>`, "")
+      .replace(`<@!${client.user.id}>`, "")
+      .trim();
+
     const completion =
       await groq.chat.completions.create({
         model: "llama-3.1-8b-instant",
@@ -156,26 +154,27 @@ IMPORTANT:
 - Understand incomplete sentences
 - Understand slang
 - Understand Thai and English
-- Reply in the same language as user
+- Reply in same language as user
 
 Company Info:
+- Recruitment website:
+https://recruitment.thai-airways.pattaramet.dev/
 - Pilot applications available
 - Cabin crew training every Saturday
-- HR available in Discord
+- HR support available
 - Royal Silk available
 - Royal First available
-- Website: https://recruitment.thai-airways.pattaramet.dev/
 
-If user asks unclear questions:
-Politely ask for more details.
+If question is unclear:
+Ask for more details politely.
 
-If user asks something outside company scope:
-Tell them to contact HR.
+If outside company scope:
+Tell user to contact HR.
 `
           },
           {
             role: "user",
-            content: message.content
+            content: cleanMessage
           }
         ],
         temperature: 0.7
@@ -195,8 +194,3 @@ Tell them to contact HR.
     );
   }
 });
-
-// ----------------------
-// LOGIN
-// ----------------------
-client.login(process.env.DISCORD_TOKEN);
