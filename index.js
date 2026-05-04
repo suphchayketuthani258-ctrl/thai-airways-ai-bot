@@ -3,10 +3,13 @@ require("dotenv").config();
 const { Client, GatewayIntentBits } = require("discord.js");
 const OpenAI = require("openai");
 const express = require("express");
+const axios = require("axios");
+const csv = require("csv-parser");
+const { Readable } = require("stream");
 
-// =============================
+// =========================
 // ENV CHECK
-// =============================
+// =========================
 if (!process.env.DISCORD_TOKEN) {
     throw new Error("ไม่พบ DISCORD_TOKEN");
 }
@@ -15,9 +18,13 @@ if (!process.env.GROQ_API_KEY) {
     throw new Error("ไม่พบ GROQ_API_KEY");
 }
 
-// =============================
-// EXPRESS SERVER (กันบอทดับบน hosting)
-// =============================
+if (!process.env.GOOGLE_SHEET_URL) {
+    throw new Error("ไม่พบ GOOGLE_SHEET_URL");
+}
+
+// =========================
+// EXPRESS SERVER
+// =========================
 const app = express();
 
 app.get("/", (req, res) => {
@@ -30,9 +37,9 @@ app.listen(PORT, () => {
     console.log(`Web server running on port ${PORT}`);
 });
 
-// =============================
+// =========================
 // DISCORD CLIENT
-// =============================
+// =========================
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -41,29 +48,65 @@ const client = new Client({
     ]
 });
 
-// =============================
+// =========================
 // GROQ AI
-// =============================
+// =========================
 const groq = new OpenAI({
     apiKey: process.env.GROQ_API_KEY,
     baseURL: "https://api.groq.com/openai/v1"
 });
 
-// =============================
-// COOLDOWN SYSTEM
-// =============================
+// =========================
+// COOLDOWN
+// =========================
 const cooldown = new Set();
 
-// =============================
+// =========================
+// LOAD GOOGLE SHEET
+// =========================
+async function loadSheetData() {
+    const response = await axios.get(
+        process.env.GOOGLE_SHEET_URL
+    );
+
+    const rows = [];
+
+    return new Promise((resolve, reject) => {
+        Readable.from(response.data)
+            .pipe(csv())
+            .on("data", (data) => rows.push(data))
+            .on("end", () => resolve(rows))
+            .on("error", reject);
+    });
+}
+
+// =========================
+// FIND RELEVANT INFO
+// =========================
+async function findRelevantInfo(question) {
+    const data = await loadSheetData();
+
+    const lowerQuestion = question.toLowerCase();
+
+    const matched = data.filter(row =>
+        lowerQuestion.includes(
+            row.keyword.toLowerCase()
+        )
+    );
+
+    return matched.slice(0, 10);
+}
+
+// =========================
 // READY
-// =============================
+// =========================
 client.once("ready", () => {
     console.log(`✅ Bot online: ${client.user.tag}`);
 });
 
-// =============================
+// =========================
 // MESSAGE EVENT
-// =============================
+// =========================
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
@@ -88,7 +131,9 @@ client.on("messageCreate", async (message) => {
         "พนักงาน"
     ];
 
-    const askingJob = jobKeywords.some(word => text.includes(word));
+    const askingJob = jobKeywords.some(word =>
+        text.includes(word)
+    );
 
     if (askingJob) {
         const isEnglish = /[a-z]/.test(text);
@@ -97,39 +142,36 @@ client.on("messageCreate", async (message) => {
             return message.reply(`
 Hello!
 
-You can apply through our official website:
+Apply here:
 https://recruitment.thai-airways.pattaramet.dev/
 
-Application steps:
+Steps:
 1. Submit application
 2. HR review
 3. Training/interview
-4. Receive rank if accepted
-
-For more info contact HR.
+4. Rank assignment
 `);
         }
 
         return message.reply(`
 สวัสดีครับ
 
-สามารถสมัครงานผ่านเว็บไซต์ทางการได้ที่:
+สมัครงานได้ที่:
 https://recruitment.thai-airways.pattaramet.dev/
 
 ขั้นตอน:
 1. ส่งใบสมัคร
 2. HR ตรวจสอบ
-3. ฝึกอบรม/สัมภาษณ์
-4. รับยศหากผ่าน
-
-สอบถามเพิ่มเติมติดต่อ HR ได้เลยครับ
+3. ฝึก/สัมภาษณ์
+4. รับยศ
 `);
     }
 
     // =====================================
-    // ROYAL SILK / ROYAL FIRST TICKET SYSTEM
+    // TICKET SYSTEM
     // =====================================
-    const isTicketChannel = channelName.includes("ticket");
+    const isTicketChannel =
+        channelName.includes("ticket");
 
     const ticketKeywords = [
         "royal silk",
@@ -140,46 +182,30 @@ https://recruitment.thai-airways.pattaramet.dev/
         "purchase"
     ];
 
-    const askingTicket = ticketKeywords.some(word =>
-        text.includes(word)
-    );
+    const askingTicket =
+        ticketKeywords.some(word =>
+            text.includes(word)
+        );
 
     if (isTicketChannel && askingTicket) {
-        const isEnglish = /[a-z]/.test(text);
-
-        if (isEnglish) {
-            return message.reply(`
-Hello!
-
-For Royal Silk / Royal First verification please provide:
-
-1. Purchase proof
-2. Roblox username
-3. Order details
-
-Staff will assist you shortly.
-`);
-        }
-
         return message.reply(`
-สวัสดีครับ
-
-สำหรับการรับยศ Royal Silk / Royal First กรุณาส่ง:
+กรุณาส่ง:
 
 1. หลักฐานการซื้อ
 2. ชื่อ Roblox
 3. รายละเอียดคำสั่งซื้อ
 
-เจ้าหน้าที่จะดำเนินการให้ครับ
+เจ้าหน้าที่จะช่วยคุณครับ
 `);
     }
 
     // =====================================
-    // AI CHAT ONLY SPECIFIC CHANNEL
+    // AI CHANNEL ONLY
     // =====================================
-    const aiChannelName = "⌊📝⌉-thai-airways-ai";
+    const aiChannel =
+        "⌊📝⌉-thai-airways-ai";
 
-    if (message.channel.name !== aiChannelName) {
+    if (message.channel.name !== aiChannel) {
         return;
     }
 
@@ -187,7 +213,9 @@ Staff will assist you shortly.
     // COOLDOWN
     // =====================================
     if (cooldown.has(message.author.id)) {
-        return message.reply("กรุณารอ 10 วินาทีก่อนใช้งาน AI อีกครั้ง");
+        return message.reply(
+            "กรุณารอ 10 วินาทีก่อนใช้งานอีกครั้ง"
+        );
     }
 
     cooldown.add(message.author.id);
@@ -199,89 +227,71 @@ Staff will assist you shortly.
     try {
         await message.channel.sendTyping();
 
-        const completion = await groq.chat.completions.create({
-            model: "llama-3.1-8b-instant",
-            messages: [
-                {
-                    role: "system",
-                    content: `
-You are the official Thai Airways Roblox AI Assistant.
+        // ดึงข้อมูลจาก Google Sheet
+        const relevantData =
+            await findRelevantInfo(
+                message.content
+            );
 
-Rules:
-- Understand Thai and English
-- Understand typos
-- Reply in same language as user
-- Be professional
-- Help users clearly
+        const sheetContext =
+            relevantData.length > 0
+                ? relevantData.map(row => `
+Category: ${row.category}
+Keyword: ${row.keyword}
+Info: ${row.info}
+`).join("\n")
+                : "No sheet data found";
 
-COMPANY INFO:
-- Recruitment website:
-https://recruitment.thai-airways.pattaramet.dev/
+        const completion =
+            await groq.chat.completions.create({
+                model: "llama-3.1-8b-instant",
+                messages: [
+                    {
+                        role: "system",
+                        content: `
+You are official Thai Airways Roblox AI assistant.
 
-- Pilot applications available
-- Cabin crew training every Saturday
-- HR support available
-- Royal Silk available
-- Royal First available
+Use Google Sheet data below when relevant:
 
-EXECUTIVE TEAM:
+${sheetContext}
+
+Permanent company info:
 
 Fino / Fino251217
-- President of Thai Airways Roblox
-- Chief Human Resources Officer
+- President
+- CHRO
 - Co-founder
-- Oversees the entire organization
-- Known as a good leader
-
-ฟิโน / Fino251217
-- ประธานบริหาร
-- ประธานฝ่ายทรัพยากรบุคคล
-- ผู้ร่วมก่อตั้ง
-
---------------------------------
 
 papangkor559
-- Chief Financial Officer
+- CFO
 - Chief Commercial Officer
 
-ภาษาไทย:
-- ประธานเจ้าหน้าที่สายการเงินการบัญชี
-- ประธานเจ้าหน้าที่สายการพาณิชย์
-
---------------------------------
-
 TH3JJ_TH
-- Director of Digital Center
-
-ภาษาไทย:
-- ผู้อำนวยการศูนย์ดิจิตอลการบินไทย
-
---------------------------------
+- Director Digital Center
 
 99KLSH
-- Director of Inflight Operations
-- Director of Ground Services
+- Director Operations
 
-ภาษาไทย:
-- ผู้อำนวยการฝ่ายปฏิบัติการบนเครื่องบิน
-- ผู้อำนวยการฝ่ายบริการภาคพื้นดิน
-
-If you don't know something:
-Tell users to contact HR.
+Rules:
+- Reply same language
+- Be professional
+- Use sheet data when available
+- If no info exists tell user contact HR
 `
-                },
-                {
-                    role: "user",
-                    content: message.content
-                }
-            ],
-            temperature: 0.7,
-            max_tokens: 500
-        });
+                    },
+                    {
+                        role: "user",
+                        content: message.content
+                    }
+                ],
+                temperature: 0.7,
+                max_tokens: 500
+            });
 
         const reply =
-            completion.choices[0]?.message?.content ||
-            "ขออภัย ระบบไม่สามารถตอบได้ในขณะนี้";
+            completion.choices[0]
+            ?.message?.content ||
+            "ขออภัย ระบบไม่สามารถตอบได้";
 
         await message.reply(reply);
 
@@ -289,12 +299,14 @@ Tell users to contact HR.
         console.error(error);
 
         await message.reply(
-            "ขออภัย ระบบ AI ขัดข้องชั่วคราว กรุณาติดต่อ HR"
+            "ระบบ AI มีปัญหาชั่วคราว"
         );
     }
 });
 
-// =============================
+// =========================
 // LOGIN
-// =============================
-client.login(process.env.DISCORD_TOKEN);
+// =========================
+client.login(
+    process.env.DISCORD_TOKEN
+);
