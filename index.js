@@ -177,7 +177,7 @@ Our staff will assist you shortly.
   // =====================================
   // AI CHAT ONLY IN SPECIFIC CHANNEL
   // =====================================
-  const aiChannelName = "⌊📝⌉-thai-airwyas-ai";
+  const aiChannelName = "⌊📝⌉-thai-airways-ai";
 
   if (message.channel.name !== aiChannelName) {
     return;
