@@ -7,20 +7,33 @@ const fs = require("fs");
 const stringSimilarity = require("string-similarity");
 
 // =============================
-// CHECK ENV
+// ENV CHECK
 // =============================
-if (!process.env.DISCORD_TOKEN) throw new Error("NO DISCORD_TOKEN");
-if (!process.env.GROQ_API_KEY) throw new Error("NO GROQ_API_KEY");
+if (!process.env.DISCORD_TOKEN) {
+    throw new Error("ไม่พบ DISCORD_TOKEN");
+}
+
+if (!process.env.GROQ_API_KEY) {
+    throw new Error("ไม่พบ GROQ_API_KEY");
+}
 
 // =============================
-// EXPRESS
+// EXPRESS SERVER
 // =============================
 const app = express();
-app.get("/", (req, res) => res.send("Bot Running"));
-app.listen(process.env.PORT || 3000);
+
+app.get("/", (req, res) => {
+    res.send("Thai Airways AI Bot Running");
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`Web server running on port ${PORT}`);
+});
 
 // =============================
-// DISCORD
+// DISCORD CLIENT
 // =============================
 const client = new Client({
     intents: [
@@ -31,7 +44,7 @@ const client = new Client({
 });
 
 // =============================
-// GROQ
+// GROQ AI
 // =============================
 const groq = new OpenAI({
     apiKey: process.env.GROQ_API_KEY,
@@ -43,6 +56,7 @@ const groq = new OpenAI({
 // =============================
 const cooldown = new Set();
 
+// =============================
 // =============================
 // KNOWLEDGE BASE
 // =============================
@@ -68,7 +82,7 @@ function smartFind(text) {
 }
 
 // =============================
-// MEMORY SYSTEM
+// USER MEMORY
 // =============================
 let memory = {};
 
@@ -95,6 +109,23 @@ function recall(userId, key) {
 }
 
 // =============================
+// SAFETY (FLIGHT GUARD)
+// =============================
+const STRICT_TOPICS = [
+    "เที่ยวบิน",
+    "flight",
+    "flight number",
+    "schedule",
+    "departure",
+    "arrival",
+    "เวลา"
+];
+
+function isStrictQuery(text) {
+    return STRICT_TOPICS.some(w => text.toLowerCase().includes(w));
+}
+
+// =============================
 // INIT LOAD
 // =============================
 loadKB();
@@ -106,20 +137,21 @@ setInterval(loadKB, 30000);
 // READY
 // =============================
 client.once("ready", () => {
-    console.log(`Bot online: ${client.user.tag}`);
+    console.log(`✅ Bot online: ${client.user.tag}`);
 });
 
 // =============================
-// MESSAGE
+// MESSAGE EVENT
 // =============================
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
     const text = message.content.toLowerCase();
     const userId = message.author.id;
+    const channelName = message.channel.name.toLowerCase();
 
     // =============================
-    // MEMORY (จำชื่อ)
+    // MEMORY (จำชื่อผู้ใช้)
     // =============================
     if (text.includes("ผมชื่อ") || text.includes("ฉันชื่อ")) {
         const name = message.content.split("ชื่อ")[1]?.trim();
@@ -130,17 +162,62 @@ client.on("messageCreate", async (message) => {
     }
 
     // =============================
-    // JOB AUTO REPLY
+    // JOB AUTO REPLY (เดิม)
     // =============================
-    const jobKeywords = ["สมัคร", "job", "pilot", "crew", "hr", "นักบิน", "ลูกเรือ"];
+    const jobKeywords = [
+        "สมัคร", "สมัครงาน", "งาน", "career", "job",
+        "apply", "pilot", "crew", "hr", "นักบิน", "ลูกเรือ", "พนักงาน"
+    ];
+
     if (jobKeywords.some(w => text.includes(w))) {
-        return message.reply("สมัครที่ https://recruitment.thai-airways.pattaramet.dev");
+        const isEnglish = /[a-z]/.test(text);
+
+        if (isEnglish) {
+            return message.reply(`
+Hello!
+
+Apply here:
+https://recruitment.thai-airways.pattaramet.dev/
+
+Steps:
+1. Apply
+2. HR review
+3. Training
+4. Get rank
+`);
+        }
+
+        return message.reply(`
+สวัสดีครับ
+
+สมัครได้ที่:
+https://recruitment.thai-airways.pattaramet.dev/
+`);
     }
 
     // =============================
-    // CHANNEL LIMIT
+    // TICKET SYSTEM (เดิม)
     // =============================
-    if (message.channel.name !== "⌊📝⌉-thai-airways-ai") return;
+    const isTicketChannel = channelName.includes("ticket");
+
+    const ticketKeywords = [
+        "royal silk", "royal first", "rank", "ยศ", "ซื้อ", "purchase"
+    ];
+
+    if (isTicketChannel && ticketKeywords.some(w => text.includes(w))) {
+        return message.reply(`
+กรุณาส่ง:
+1. หลักฐานการซื้อ
+2. Roblox username
+3. รายละเอียด
+`);
+    }
+
+    // =============================
+    // AI CHANNEL ONLY
+    // =============================
+    const aiChannelName = "⌊📝⌉-thai-airways-ai";
+    if (message.channel.name !== aiChannelName) return;
 
     // =============================
     // COOLDOWN
@@ -155,26 +232,38 @@ client.on("messageCreate", async (message) => {
     try {
         await message.channel.sendTyping();
 
-        // =============================
-        // SMART KB + MEMORY
-        // =============================
         const kb = smartFind(text);
         const name = recall(userId, "name");
 
+        // =============================
+        // SAFETY CHECK (FLIGHT GUARD)
+        // =============================
+        if (isStrictQuery(text) && !kb) {
+            return message.reply(
+                "ไม่มีข้อมูลเที่ยวบินในระบบ กรุณาติดต่อ HR เพื่อสอบถามข้อมูลที่ถูกต้อง"
+            );
+        }
+
         const completion = await groq.chat.completions.create({
             model: "llama-3.1-8b-instant",
+            temperature: 0.3,
+            max_tokens: 500,
             messages: [
                 {
                     role: "system",
                     content: `
-You are Thai Airways Roblox AI.
+You are Thai Airways Roblox AI Assistant.
 
 User name: ${name || "unknown"}
 
-Knowledge:
-${kb ? kb.answer : ""}
+⚠️ STRICT RULES:
+- NEVER invent flight numbers
+- NEVER invent schedules or times
+- ONLY use provided knowledge
+- If no data → say "ไม่มีข้อมูล กรุณาติดต่อ HR"
 
-Be helpful and professional.
+Knowledge:
+${kb ? kb.answer : "NO DATA"}
 `
                 },
                 {
@@ -184,10 +273,11 @@ Be helpful and professional.
             ]
         });
 
-        await message.reply(
+        const reply =
             completion.choices[0]?.message?.content ||
-            "ไม่สามารถตอบได้"
-        );
+            "ไม่มีข้อมูล กรุณาติดต่อ HR";
+
+        await message.reply(reply);
 
     } catch (err) {
         console.error(err);
