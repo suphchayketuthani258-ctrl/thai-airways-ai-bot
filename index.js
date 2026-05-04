@@ -5,7 +5,7 @@ const OpenAI = require("openai");
 const db = require("./database");
 
 // =============================
-// CLIENT
+// CLIENT SETUP
 // =============================
 const client = new Client({
     intents: [
@@ -27,43 +27,43 @@ const memory = new Map();
 const cooldown = new Set();
 
 // =============================
-// CHANNEL LOCK
+// CHANNEL LOCK (AI ONLY)
 // =============================
 const AI_CHANNEL_NAME = "⌊📝⌉-thai-airways-ai";
 
 // =============================
-// SYSTEM (CUSTOMER SERVICE)
+// SYSTEM (CUSTOMER SERVICE MODE)
 // =============================
 const SYSTEM = `
 You are Thai Airways Roblox Customer Service AI.
 
 ROLE:
-- You are NOT HR anymore
-- You are CUSTOMER SERVICE agent
-- Your job is to help passengers, users, and applicants
+- You are a customer support assistant (NOT HR)
+- Help users with flights, tickets, and applications
 
 RULES:
-- Be polite, helpful, friendly
-- Do not invent flight data
-- Use only provided database
-- If unknown → suggest contact support
+- Do NOT invent flights
+- Use only database data
+- If unknown → suggest recruitment link or support
+
+BE PROFESSIONAL AND FRIENDLY
 `;
 
 // =============================
-// READY
+// READY EVENT
 // =============================
 client.once("ready", () => {
     console.log("🤖 Customer Service AI Online");
 });
 
 // =============================
-// MESSAGE EVENT
+// MESSAGE HANDLER
 // =============================
 client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
 
     // =============================
-    // LOCK CHANNEL
+    // LOCK CHANNEL (AI ONLY)
     // =============================
     if (msg.channel.name !== AI_CHANNEL_NAME) return;
 
@@ -80,7 +80,7 @@ client.on("messageCreate", async (msg) => {
     const text = msg.content.toLowerCase();
 
     // =============================
-    // FLIGHT DATA
+    // LOAD DATABASE
     // =============================
     const flights = db.getFlights();
     const info = db.getInfo();
@@ -93,68 +93,99 @@ client.on("messageCreate", async (msg) => {
 
     const infoText = info.length
         ? info.map(i => `${i.key}: ${i.value}`).join("\n")
-        : "NO INFO";
+        : "NO INFO DATA";
 
     // =============================
-    // 🎯 1. AUTO JOB / APPLY DETECTION
+    // ✈ JOB / APPLICATION DETECTION
     // =============================
     const jobKeywords = [
-        "สมัคร", "สมัครงาน", "อยากทำงาน", "อยากเป็นนักบิน",
-        "อยากเป็นพนักงาน", "pilot", "crew", "job", "work"
+        "สมัคร", "สมัครงาน", "อยากทำงาน",
+        "อยากเป็นนักบิน", "pilot", "crew",
+        "job", "work", "พนักงาน", "airline"
     ];
 
     const isJob = jobKeywords.some(k => text.includes(k));
 
     if (isJob) {
         return msg.reply(`
-✈️ สวัสดีครับ ยินดีต้อนรับสู่ระบบสมัครงาน Thai Airways Roblox
+✈️ Thai Airways Roblox Recruitment
 
 คุณสามารถสมัครงานได้ที่:
 👉 https://recruitment.thai-airways.pattaramet.dev/
 
-📌 ขั้นตอนการสมัคร:
-1. กรอกใบสมัครออนไลน์
-2. รอการตรวจสอบจากฝ่าย HR
+📌 ขั้นตอน:
+1. กรอกใบสมัคร
+2. HR ตรวจสอบ
 3. เข้ารับการอบรม
-4. ประกาศผลการคัดเลือก
+4. ประกาศผล
 
-หากมีคำถามเพิ่มเติมสามารถสอบถามได้เลยครับ 😊
+หากมีคำถามเพิ่มเติมสามารถสอบถามได้ครับ 😊
         `);
     }
 
     // =============================
-    // 🎫 2. TICKET AUTO SYSTEM
+    // 🎫 TICKET SYSTEM (FIXED)
     // =============================
-    const isTicket = msg.channel.name.startsWith("ticket");
+    const isTicketChannel = msg.channel.name
+        .toLowerCase()
+        .startsWith("ticket");
 
     const ticketKeywords = [
         "royal silk",
         "royal first",
         "ยศ",
         "ซื้อ",
+        "รับยศ",
         "purchase",
         "payment",
-        "รับยศ"
+        "rank",
+        "claim",
+        "verify",
+        "ตรวจสอบ"
     ];
 
-    const isTicketMsg = ticketKeywords.some(k => text.includes(k));
+    const isTicketMessage = ticketKeywords.some(k =>
+        text.includes(k)
+    );
 
-    if (isTicket && isTicketMsg) {
+    if (isTicketChannel && isTicketMessage) {
         return msg.reply(`
-🙏 ขอบคุณสำหรับการติดต่อฝ่ายบริการลูกค้า Thai Airways Roblox
+🙏 ขอบคุณที่ติดต่อฝ่ายบริการลูกค้า Thai Airways Roblox
 
 เพื่อให้เจ้าหน้าที่ดำเนินการได้เร็วที่สุด กรุณาส่งข้อมูลดังนี้:
 
 1️⃣ หลักฐานการซื้อ (Screenshot / Receipt)
 2️⃣ ชื่อผู้ใช้ Roblox
 
-📌 หลังจากได้รับข้อมูลครบถ้วนแล้ว
-เจ้าหน้าที่จะทำการตรวจสอบและดำเนินการให้โดยเร็วที่สุดครับ ✈️
+📌 หลังจากได้รับข้อมูลครบถ้วน
+เจ้าหน้าที่จะตรวจสอบและดำเนินการให้เร็วที่สุดครับ ✈️
         `);
     }
 
     // =============================
-    // MEMORY
+    // TICKET FALLBACK (CATCH ALL)
+    // =============================
+    if (isTicketChannel) {
+        if (
+            text.includes("royal") ||
+            text.includes("ยศ") ||
+            text.includes("ซื้อ") ||
+            text.includes("รับ")
+        ) {
+            return msg.reply(`
+🙏 รับเรื่องเรียบร้อยครับ
+
+กรุณาส่ง:
+1️⃣ หลักฐานการซื้อ
+2️⃣ Roblox username
+
+เจ้าหน้าที่จะดำเนินการให้เร็วที่สุด ✈️
+            `);
+        }
+    }
+
+    // =============================
+    // MEMORY SYSTEM
     // =============================
     let history = memory.get(msg.author.id) || [];
 
