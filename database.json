@@ -1,5 +1,22 @@
 {
-  "flights": [],
-  "info": [],
-  "announcements": []
+  "flights": [
+    {
+      "id": "TG101",
+      "from": "Bangkok",
+      "to": "Chiang Mai",
+      "time": "18:15"
+    },
+    {
+      "id": "TG205",
+      "from": "Bangkok",
+      "to": "Phuket",
+      "time": "20:30"
+    }
+  ],
+  "info": [
+    {
+      "key": "บริษัท",
+      "value": "Thai Airways Roblox Airline System"
+    }
+  ]
 }

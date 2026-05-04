@@ -1,34 +1,44 @@
 const express = require("express");
-const body = require("body-parser");
-const db = require("./database");
+const fs = require("fs");
 
 const app = express();
-app.use(body.json());
+app.use(express.json());
 
-// ================= FLIGHT =================
-app.post("/flight/add",(req,res)=>{
-db.addFlight(req.body);
-res.json({ok:true});
+const DB_PATH = "./database.json";
+
+function read() {
+    return JSON.parse(fs.readFileSync(DB_PATH));
+}
+
+function save(data) {
+    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+}
+
+// =============================
+// ADD FLIGHT
+// =============================
+app.post("/flight/add", (req, res) => {
+    const db = read();
+
+    db.flights.push({
+        id: req.body.id,
+        from: req.body.from,
+        to: req.body.to,
+        time: req.body.time
+    });
+
+    save(db);
+
+    res.json({ success: true });
 });
 
-app.get("/flight",(req,res)=>{
-res.json(db.getFlights());
+// =============================
+// GET FLIGHTS
+// =============================
+app.get("/flight", (req, res) => {
+    res.json(read().flights);
 });
 
-// ================= INFO =================
-app.post("/info/add",(req,res)=>{
-db.addInfo(req.body);
-res.json({ok:true});
+app.listen(4000, () => {
+    console.log("Dashboard running http://localhost:4000");
 });
-
-app.get("/info",(req,res)=>{
-res.json(db.getInfo());
-});
-
-// ================= ANNOUNCE =================
-app.post("/announce",(req,res)=>{
-db.addAnnounce(req.body.text);
-res.json({ok:true});
-});
-
-app.listen(4000,()=>console.log("Dashboard ON"));
