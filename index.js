@@ -5,219 +5,154 @@ const OpenAI = require("openai");
 const db = require("./database");
 
 // =============================
-// 🌐 WEB SERVER
-// =============================
-const express = require("express");
-const app = express();
-
-app.use(express.json());
-app.use(express.static("public"));
-
-let trainingData = [];
-
-// API: GET flights
-app.get("/flights", (req, res) => {
-    res.json(db.getFlights());
-});
-
-// API: ADD flight
-app.post("/add-flight", (req, res) => {
-    const { from, to, time } = req.body;
-    db.addFlight(from, to, time);
-    res.sendStatus(200);
-});
-
-// API: TRAIN AI
-app.post("/train", (req, res) => {
-    trainingData.push(req.body.text);
-    res.sendStatus(200);
-});
-
-// API: GET TRAIN DATA
-app.get("/train", (req, res) => {
-    res.json(trainingData);
-});
-
-app.listen(3000, () => {
-    console.log("🌐 Web running on http://localhost:3000");
-});
-
-// =============================
-// 🤖 DISCORD BOT
+// CLIENT SETUP
 // =============================
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ]
-});
-
-const groq = new OpenAI({
-    apiKey: process.env.GROQ_API_KEY,
-    baseURL: "https://api.groq.com/openai/v1"
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 // =============================
-// 🧠 MEMORY + COOLDOWN
+// GROQ AI
+// =============================
+const groq = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: "https://api.groq.com/openai/v1"
+});
+
+// =============================
+// MEMORY + COOLDOWN
 // =============================
 const memory = new Map();
 const cooldown = new Set();
 
 // =============================
-// 🔒 SYSTEM (ANTI REAL-WORLD)
+// SYSTEM PROMPT
 // =============================
-const SYSTEM = `
-You are Thai Airways Roblox Customer Service AI (FICTIONAL SYSTEM).
-
-STRICT RULES:
-- You MUST NOT reference real-world airlines or Thai Airways.
-- You MUST NOT provide real flight schedules or real data.
-- You MUST NOT mention real websites.
-- Everything is fictional and stored in this system only.
-- If user asks about real-world info → say not available.
-
-Behavior:
-- Speak Thai politely
-- Keep answer short
-- Help about Roblox airline system only
-`;
+const SYSTEM = "You are Thai Airways Roblox Customer Service AI.";
 
 // =============================
-// 🛡 SANITIZE AI OUTPUT
-// =============================
-function sanitizeAI(text) {
-    const banned = [
-        "http", "www.", "thai airways", "การบินไทย",
-        "suvarnabhumi", "don mueang"
-    ];
-
-    const lower = text.toLowerCase();
-
-    if (banned.some(w => lower.includes(w))) {
-        return "⚠️ ระบบนี้เป็นระบบจำลอง ไม่สามารถให้ข้อมูลจริงได้";
-    }
-
-    return text;
-}
-
-// =============================
-// 🚀 READY
+// READY
 // =============================
 client.once("ready", () => {
-    console.log("🤖 AI ONLINE");
+  console.log("🤖 AI ONLINE");
 });
 
 // =============================
-// 💬 MESSAGE HANDLER
+// MESSAGE EVENT
 // =============================
 client.on("messageCreate", async (msg) => {
-    if (msg.author.bot) return;
+  if (msg.author.bot) return;
 
-    const channelName = msg.channel.name.toLowerCase();
-    const text = msg.content.toLowerCase();
+  const channelName = msg.channel.name.toLowerCase();
+  const text = msg.content.toLowerCase();
 
-    // =============================
-    // LOCK CHANNEL (ยืดหยุ่นขึ้น)
-    // =============================
-    if (!channelName.includes("thai-airways-ai")) return;
+  // =============================
+  // LOCK CHANNEL
+  // =============================
+  if (channelName !== "⌊📝⌉-thai-airways-ai") return;
 
-    // =============================
-    // COOLDOWN
-    // =============================
-    if (cooldown.has(msg.author.id)) {
-        return msg.reply("⏳ รอ 5 วินาที");
-    }
+  // =============================
+  // COOLDOWN
+  // =============================
+  if (cooldown.has(msg.author.id)) {
+    return msg.reply("⏳ รอ 10 วิ");
+  }
 
-    cooldown.add(msg.author.id);
-    setTimeout(() => cooldown.delete(msg.author.id), 5000);
+  cooldown.add(msg.author.id);
+  setTimeout(() => cooldown.delete(msg.author.id), 10000);
 
-    // =============================
-    // DATABASE
-    // =============================
-    const flights = db.getFlights();
+  // =============================
+  // DATABASE (FLIGHTS)
+  // =============================
+  const flights = db.getFlights();
 
-    const flightText = flights.length
-        ? flights.slice(0, 10).map(f =>
-            `${f.id}: ${f.from} → ${f.to} ${f.time}`
-        ).join("\n")
-        : "NO FLIGHTS";
+  const flightText = flights.length
+    ? flights.map(f => `${f.id}: ${f.from} → ${f.to} ${f.time}`).join("\n")
+    : "NO FLIGHTS";
 
-    // =============================
-    // 🎫 TICKET SYSTEM (เดิม)
-    // =============================
-    const isTicketChannel = channelName.includes("ticket");
+  // =============================
+  // 🎫 TICKET FIX
+  // =============================
+  const isTicketChannel = channelName.includes("ticket");
 
-    const normalized = text
-        .replace(/\s+/g, " ")
-        .replace(/rotal/g, "royal");
+  const normalized = text
+    .replace(/\s+/g, " ")
+    .replace(/rotal/g, "royal");
 
-    const matchTicket =
-        /royal|silk|rank|claim|verify|ซื้อ|ยศ/.test(normalized);
+  const matchTicket =
+    normalized.includes("royal") ||
+    normalized.includes("silk") ||
+    normalized.includes("ยศ") ||
+    normalized.includes("ซื้อ") ||
+    normalized.includes("rank") ||
+    normalized.includes("claim") ||
+    normalized.includes("verify");
 
-    if (isTicketChannel && matchTicket) {
-        return msg.reply(`
-🙏 ขอบคุณที่ติดต่อฝ่ายบริการลูกค้า
+  if (isTicketChannel && matchTicket) {
+    return msg.reply(
+      `🙏 ขอบคุณที่ติดต่อฝ่ายบริการลูกค้า  
+กรุณาส่ง:  
+1️⃣ หลักฐานการซื้อ  
+2️⃣ Roblox username  
 
-กรุณาส่ง:
-1️⃣ หลักฐานการซื้อ
-2️⃣ Roblox username
+✈️ เจ้าหน้าที่จะดำเนินการเร็วที่สุด`
+    );
+  }
 
-✈️ เจ้าหน้าที่จะดำเนินการเร็วที่สุด
-        `);
-    }
+  // =============================
+  // MEMORY
+  // =============================
+  let history = memory.get(msg.author.id) || [];
 
-    // =============================
-    // 🧠 MEMORY
-    // =============================
-    let history = memory.get(msg.author.id) || [];
+  history.push({
+    role: "user",
+    content: msg.content
+  });
 
-    history.push({ role: "user", content: msg.content });
-    history = history.slice(-10);
+  history = history.slice(-6);
+  memory.set(msg.author.id, history);
+
+  // =============================
+  // AI RESPONSE
+  // =============================
+  try {
+    await msg.channel.sendTyping();
+
+    const res = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        {
+          role: "system",
+          content: `${SYSTEM}\n\nFLIGHTS:\n${flightText}`
+        },
+        ...history
+      ],
+      temperature: 0.4,
+      max_tokens: 500
+    });
+
+    const reply = res.choices[0].message.content;
+
+    history.push({
+      role: "assistant",
+      content: reply
+    });
+
     memory.set(msg.author.id, history);
 
-    try {
-        await msg.channel.sendTyping();
+    msg.reply(reply);
 
-        const res = await groq.chat.completions.create({
-            model: "llama-3.1-8b-instant",
-            messages: [
-                {
-                    role: "system",
-                    content:
-                        SYSTEM +
-                        `
-
-TRAINING DATA:
-${trainingData.join("\n")}
-
-FLIGHTS:
-${flightText}
-`
-                },
-                ...history
-            ],
-            temperature: 0.4,
-            max_tokens: 500
-        });
-
-        let reply = res.choices[0].message.content;
-
-        // 🛡 sanitize
-        reply = sanitizeAI(reply);
-
-        history.push({ role: "assistant", content: reply });
-        memory.set(msg.author.id, history);
-
-        msg.reply(reply);
-
-    } catch (err) {
-        console.error(err);
-        msg.reply("❌ ระบบขัดข้อง กรุณาลองใหม่");
-    }
+  } catch (err) {
+    console.error(err);
+    msg.reply("❌ error");
+  }
 });
 
 // =============================
-// 🔑 LOGIN
+// LOGIN
 // =============================
 client.login(process.env.DISCORD_TOKEN);
