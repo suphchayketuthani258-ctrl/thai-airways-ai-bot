@@ -16,7 +16,7 @@ if (!process.env.GROQ_API_KEY) {
 }
 
 // =============================
-// EXPRESS SERVER (กันบอทดับบน hosting)
+// EXPRESS SERVER
 // =============================
 const app = express();
 
@@ -55,7 +55,56 @@ const groq = new OpenAI({
 const cooldown = new Set();
 
 // =============================
-// READY
+// MEMORY SYSTEM (NEW)
+// =============================
+const memory = new Map();
+
+// =============================
+// SYSTEM PROMPT (UPGRADED)
+// =============================
+const SYSTEM_PROMPT = `
+You are an official AI Assistant for "Thai Airways Roblox Airline System".
+
+⚠️ RULES:
+- Professional airline HR + support assistant
+- NEVER invent information
+- If unsure → say "Please contact HR for confirmation"
+- This is ONLY Roblox airline roleplay system
+
+🧠 THINKING:
+1. Understand intent (job / ticket / support / general)
+2. Use company info if available
+3. If unknown → HR only
+4. Be clear and structured
+
+🌐 LANGUAGE:
+- Reply in same language as user
+- Be polite and professional
+
+🏢 COMPANY INFO:
+
+Recruitment:
+- Website: https://recruitment.thai-airways.pattaramet.dev/
+- Jobs: Pilot, Cabin Crew, Ground Staff
+- Process: Apply → HR Review → Training → Approval
+
+Ticket System:
+- Royal Silk = Premium class
+- Royal First = Highest class
+- Requires proof + Roblox username
+
+EXECUTIVE TEAM:
+- Fino251217: President / HR Chief / Founder
+- papangkor559: CFO / CCO
+- TH3JJ_TH: Digital Director
+- 99KLSH: Operations Director
+
+🚨 IMPORTANT:
+If not in system → ALWAYS say contact HR
+`;
+
+// =============================
+// READY EVENT
 // =============================
 client.once("ready", () => {
     console.log(`✅ Bot online: ${client.user.tag}`);
@@ -71,7 +120,7 @@ client.on("messageCreate", async (message) => {
     const channelName = message.channel.name.toLowerCase();
 
     // =====================================
-    // JOB APPLICATION AUTO REPLY
+    // JOB SYSTEM
     // =====================================
     const jobKeywords = [
         "สมัคร",
@@ -97,37 +146,33 @@ client.on("messageCreate", async (message) => {
             return message.reply(`
 Hello!
 
-You can apply through our official website:
+Apply here:
 https://recruitment.thai-airways.pattaramet.dev/
 
-Application steps:
-1. Submit application
-2. HR review
-3. Training/interview
-4. Receive rank if accepted
-
-For more info contact HR.
+Steps:
+1. Apply
+2. HR Review
+3. Training
+4. Approval
 `);
         }
 
         return message.reply(`
 สวัสดีครับ
 
-สามารถสมัครงานผ่านเว็บไซต์ทางการได้ที่:
+สมัครงาน:
 https://recruitment.thai-airways.pattaramet.dev/
 
 ขั้นตอน:
-1. ส่งใบสมัคร
+1. สมัคร
 2. HR ตรวจสอบ
-3. ฝึกอบรม/สัมภาษณ์
-4. รับยศหากผ่าน
-
-สอบถามเพิ่มเติมติดต่อ HR ได้เลยครับ
+3. ฝึกอบรม
+4. อนุมัติ
 `);
     }
 
     // =====================================
-    // ROYAL SILK / ROYAL FIRST TICKET SYSTEM
+    // TICKET SYSTEM
     // =====================================
     const isTicketChannel = channelName.includes("ticket");
 
@@ -151,31 +196,25 @@ https://recruitment.thai-airways.pattaramet.dev/
             return message.reply(`
 Hello!
 
-For Royal Silk / Royal First verification please provide:
-
+Please provide:
 1. Purchase proof
 2. Roblox username
 3. Order details
-
-Staff will assist you shortly.
 `);
         }
 
         return message.reply(`
 สวัสดีครับ
 
-สำหรับการรับยศ Royal Silk / Royal First กรุณาส่ง:
-
-1. หลักฐานการซื้อ
-2. ชื่อ Roblox
-3. รายละเอียดคำสั่งซื้อ
-
-เจ้าหน้าที่จะดำเนินการให้ครับ
+กรุณาส่ง:
+1. หลักฐานซื้อ
+2. Roblox username
+3. รายละเอียด
 `);
     }
 
     // =====================================
-    // AI CHAT ONLY SPECIFIC CHANNEL
+    // AI CHANNEL ONLY
     // =====================================
     const aiChannelName = "⌊📝⌉-thai-airways-ai";
 
@@ -199,83 +238,33 @@ Staff will assist you shortly.
     try {
         await message.channel.sendTyping();
 
+        // =============================
+        // MEMORY UPDATE
+        // =============================
+        let history = memory.get(message.author.id) || [];
+
+        history.push({
+            role: "user",
+            content: message.content
+        });
+
+        history = history.slice(-6);
+
+        memory.set(message.author.id, history);
+
+        // =============================
+        // AI REQUEST
+        // =============================
         const completion = await groq.chat.completions.create({
             model: "llama-3.1-8b-instant",
             messages: [
                 {
                     role: "system",
-                    content: `
-You are the official Thai Airways Roblox AI Assistant.
-
-Rules:
-- Understand Thai and English
-- Understand typos
-- Reply in same language as user
-- Be professional
-- Help users clearly
-
-COMPANY INFO:
-- Recruitment website:
-https://recruitment.thai-airways.pattaramet.dev/
-
-- Pilot applications available
-- Cabin crew training every Saturday
-- HR support available
-- Royal Silk available
-- Royal First available
-
-EXECUTIVE TEAM:
-
-Fino / Fino251217
-- President of Thai Airways Roblox
-- Chief Human Resources Officer
-- Co-founder
-- Oversees the entire organization
-- Known as a good leader
-
-ฟิโน / Fino251217
-- ประธานบริหาร
-- ประธานฝ่ายทรัพยากรบุคคล
-- ผู้ร่วมก่อตั้ง
-
---------------------------------
-
-papangkor559
-- Chief Financial Officer
-- Chief Commercial Officer
-
-ภาษาไทย:
-- ประธานเจ้าหน้าที่สายการเงินการบัญชี
-- ประธานเจ้าหน้าที่สายการพาณิชย์
-
---------------------------------
-
-TH3JJ_TH
-- Director of Digital Center
-
-ภาษาไทย:
-- ผู้อำนวยการศูนย์ดิจิตอลการบินไทย
-
---------------------------------
-
-99KLSH
-- Director of Inflight Operations
-- Director of Ground Services
-
-ภาษาไทย:
-- ผู้อำนวยการฝ่ายปฏิบัติการบนเครื่องบิน
-- ผู้อำนวยการฝ่ายบริการภาคพื้นดิน
-
-If you don't know something:
-Tell users to contact HR.
-`
+                    content: SYSTEM_PROMPT
                 },
-                {
-                    role: "user",
-                    content: message.content
-                }
+                ...history
             ],
-            temperature: 0.7,
+            temperature: 0.6,
             max_tokens: 500
         });
 
@@ -283,14 +272,20 @@ Tell users to contact HR.
             completion.choices[0]?.message?.content ||
             "ขออภัย ระบบไม่สามารถตอบได้ในขณะนี้";
 
+        // add bot response to memory
+        history.push({
+            role: "assistant",
+            content: reply
+        });
+
+        memory.set(message.author.id, history);
+
         await message.reply(reply);
 
     } catch (error) {
         console.error(error);
 
-        await message.reply(
-            "ขออภัย ระบบ AI ขัดข้องชั่วคราว กรุณาติดต่อ HR"
-        );
+        await message.reply("ขออภัย ระบบ AI ขัดข้อง กรุณาติดต่อ HR");
     }
 });
 
