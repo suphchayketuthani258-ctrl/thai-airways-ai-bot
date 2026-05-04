@@ -8,7 +8,7 @@ const csv = require("csv-parser");
 const { Readable } = require("stream");
 
 // =========================
-// ENV CHECK
+// ENV CHECK (soft safe)
 // =========================
 if (!process.env.DISCORD_TOKEN) {
     throw new Error("ไม่พบ DISCORD_TOKEN");
@@ -19,7 +19,7 @@ if (!process.env.GROQ_API_KEY) {
 }
 
 if (!process.env.GOOGLE_SHEET_URL) {
-    throw new Error("ไม่พบ GOOGLE_SHEET_URL");
+    console.log("⚠️ ไม่มี GOOGLE_SHEET_URL -> ใช้ AI อย่างเดียว");
 }
 
 // =========================
@@ -62,45 +62,56 @@ const groq = new OpenAI({
 const cooldown = new Set();
 
 // =========================
-// LOAD GOOGLE SHEET
+// LOAD GOOGLE SHEET (SAFE)
 // =========================
 async function loadSheetData() {
-    const response = await axios.get(
-        process.env.GOOGLE_SHEET_URL
-    );
+    try {
+        if (!process.env.GOOGLE_SHEET_URL) return [];
 
-    const rows = [];
+        const response = await axios.get(
+            process.env.GOOGLE_SHEET_URL
+        );
 
-    return new Promise((resolve, reject) => {
-        Readable.from(response.data)
-            .pipe(csv())
-            .on("data", (data) => rows.push(data))
-            .on("end", () => resolve(rows))
-            .on("error", reject);
-    });
+        const rows = [];
+
+        return new Promise((resolve, reject) => {
+            Readable.from(response.data)
+                .pipe(csv())
+                .on("data", (data) => rows.push(data))
+                .on("end", () => resolve(rows))
+                .on("error", reject);
+        });
+
+    } catch (err) {
+        console.log("Sheet load error:", err.message);
+        return [];
+    }
 }
 
 // =========================
-// FIND RELEVANT INFO
+// FIND RELEVANT DATA (FIXED)
 // =========================
 async function findRelevantInfo(question) {
     const data = await loadSheetData();
 
     const lowerQuestion = question.toLowerCase();
 
-    const matched = data.filter(row =>
-        lowerQuestion.includes(
-            row.keyword.toLowerCase()
-        )
-    );
+    const matched = data.filter(row => {
+        if (!row.keyword) return false;
+        if (!row.info) return false;
+
+        return lowerQuestion.includes(
+            String(row.keyword).toLowerCase()
+        );
+    });
 
     return matched.slice(0, 10);
 }
 
 // =========================
-// READY
+// READY EVENT (FIXED)
 // =========================
-client.once("ready", () => {
+client.once("clientReady", () => {
     console.log(`✅ Bot online: ${client.user.tag}`);
 });
 
@@ -113,200 +124,122 @@ client.on("messageCreate", async (message) => {
     const text = message.content.toLowerCase();
     const channelName = message.channel.name.toLowerCase();
 
-    // =====================================
-    // JOB APPLICATION AUTO REPLY
-    // =====================================
+    // =========================
+    // JOB SYSTEM
+    // =========================
     const jobKeywords = [
-        "สมัคร",
-        "สมัครงาน",
-        "งาน",
-        "career",
-        "job",
-        "apply",
-        "pilot",
-        "crew",
-        "hr",
-        "นักบิน",
-        "ลูกเรือ",
-        "พนักงาน"
+        "สมัคร", "สมัครงาน", "งาน", "career", "job",
+        "apply", "pilot", "crew", "hr", "นักบิน", "ลูกเรือ"
     ];
 
-    const askingJob = jobKeywords.some(word =>
-        text.includes(word)
-    );
-
-    if (askingJob) {
-        const isEnglish = /[a-z]/.test(text);
-
-        if (isEnglish) {
-            return message.reply(`
-Hello!
-
-Apply here:
-https://recruitment.thai-airways.pattaramet.dev/
-
-Steps:
-1. Submit application
-2. HR review
-3. Training/interview
-4. Rank assignment
-`);
-        }
-
+    if (jobKeywords.some(w => text.includes(w))) {
         return message.reply(`
-สวัสดีครับ
+📌 สมัครงานการบินไทย Roblox
 
-สมัครงานได้ที่:
 https://recruitment.thai-airways.pattaramet.dev/
 
 ขั้นตอน:
-1. ส่งใบสมัคร
+1. สมัคร
 2. HR ตรวจสอบ
-3. ฝึก/สัมภาษณ์
+3. สัมภาษณ์
 4. รับยศ
 `);
     }
 
-    // =====================================
+    // =========================
     // TICKET SYSTEM
-    // =====================================
-    const isTicketChannel =
-        channelName.includes("ticket");
-
-    const ticketKeywords = [
-        "royal silk",
-        "royal first",
-        "rank",
-        "ยศ",
-        "ซื้อ",
-        "purchase"
-    ];
-
-    const askingTicket =
-        ticketKeywords.some(word =>
-            text.includes(word)
-        );
-
-    if (isTicketChannel && askingTicket) {
+    // =========================
+    if (
+        channelName.includes("ticket") &&
+        (text.includes("royal") || text.includes("ยศ") || text.includes("ซื้อ"))
+    ) {
         return message.reply(`
-กรุณาส่ง:
+🎫 กรุณาส่งข้อมูล:
 
 1. หลักฐานการซื้อ
-2. ชื่อ Roblox
+2. Roblox username
 3. รายละเอียดคำสั่งซื้อ
 
-เจ้าหน้าที่จะช่วยคุณครับ
+เจ้าหน้าที่จะตรวจสอบให้ครับ
 `);
     }
 
-    // =====================================
+    // =========================
     // AI CHANNEL ONLY
-    // =====================================
-    const aiChannel =
-        "⌊📝⌉-thai-airways-ai";
+    // =========================
+    const aiChannel = "⌊📝⌉-thai-airways-ai";
 
-    if (message.channel.name !== aiChannel) {
-        return;
-    }
+    if (message.channel.name !== aiChannel) return;
 
-    // =====================================
+    // =========================
     // COOLDOWN
-    // =====================================
+    // =========================
     if (cooldown.has(message.author.id)) {
-        return message.reply(
-            "กรุณารอ 10 วินาทีก่อนใช้งานอีกครั้ง"
-        );
+        return message.reply("⏳ กรุณารอ 10 วินาที");
     }
 
     cooldown.add(message.author.id);
-
-    setTimeout(() => {
-        cooldown.delete(message.author.id);
-    }, 10000);
+    setTimeout(() => cooldown.delete(message.author.id), 10000);
 
     try {
         await message.channel.sendTyping();
 
-        // ดึงข้อมูลจาก Google Sheet
-        const relevantData =
-            await findRelevantInfo(
-                message.content
-            );
+        const sheetData = await findRelevantInfo(message.content);
 
-        const sheetContext =
-            relevantData.length > 0
-                ? relevantData.map(row => `
-Category: ${row.category}
-Keyword: ${row.keyword}
-Info: ${row.info}
+        const context =
+            sheetData.length > 0
+                ? sheetData.map(r => `
+Category: ${r.category || "N/A"}
+Keyword: ${r.keyword}
+Info: ${r.info}
 `).join("\n")
                 : "No sheet data found";
 
-        const completion =
-            await groq.chat.completions.create({
-                model: "llama-3.1-8b-instant",
-                messages: [
-                    {
-                        role: "system",
-                        content: `
-You are official Thai Airways Roblox AI assistant.
+        const completion = await groq.chat.completions.create({
+            model: "llama-3.1-8b-instant",
+            messages: [
+                {
+                    role: "system",
+                    content: `
+You are Thai Airways Roblox AI assistant.
 
-Use Google Sheet data below when relevant:
+Use this database when relevant:
 
-${sheetContext}
+${context}
 
-Permanent company info:
-
-Fino / Fino251217
-- President
-- CHRO
-- Co-founder
-
-papangkor559
-- CFO
-- Chief Commercial Officer
-
-TH3JJ_TH
-- Director Digital Center
-
-99KLSH
-- Director Operations
+Executive info:
+- Fino: CEO, CHRO, Co-founder
+- papangkor559: CFO, CCO
+- TH3JJ_TH: Director Digital
+- 99KLSH: Director Operations
 
 Rules:
-- Reply same language
-- Be professional
-- Use sheet data when available
-- If no info exists tell user contact HR
+- Reply naturally
+- Use sheet if relevant
+- If no info → answer normally or say contact HR
 `
-                    },
-                    {
-                        role: "user",
-                        content: message.content
-                    }
-                ],
-                temperature: 0.7,
-                max_tokens: 500
-            });
+                },
+                {
+                    role: "user",
+                    content: message.content
+                }
+            ],
+            temperature: 0.7
+        });
 
         const reply =
-            completion.choices[0]
-            ?.message?.content ||
+            completion.choices[0]?.message?.content ||
             "ขออภัย ระบบไม่สามารถตอบได้";
 
         await message.reply(reply);
 
-    } catch (error) {
-        console.error(error);
-
-        await message.reply(
-            "ระบบ AI มีปัญหาชั่วคราว"
-        );
+    } catch (err) {
+        console.error(err);
+        await message.reply("❌ ระบบ AI ขัดข้องชั่วคราว");
     }
 });
 
 // =========================
 // LOGIN
 // =========================
-client.login(
-    process.env.DISCORD_TOKEN
-);
+client.login(process.env.DISCORD_TOKEN);
