@@ -1,16 +1,16 @@
 {
   "flights": [
     {
-      "id": "TG101",
+      "id": "TG401",
       "from": "Bangkok",
-      "to": "Chiang Mai",
-      "time": "18:15"
+      "to": "Singapore",
+      "time": "19:00"
     },
     {
-      "id": "TG205",
-      "from": "Bangkok",
-      "to": "Phuket",
-      "time": "20:30"
+      "id": "",
+      "from": "",
+      "to": "",
+      "time": ""
     }
   ],
   "info": [
