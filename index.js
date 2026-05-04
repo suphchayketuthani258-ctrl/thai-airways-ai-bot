@@ -5,7 +5,7 @@ const OpenAI = require("openai");
 const db = require("./database");
 
 // =============================
-// CLIENT SETUP
+// CLIENT
 // =============================
 const client = new Client({
     intents: [
@@ -27,43 +27,41 @@ const memory = new Map();
 const cooldown = new Set();
 
 // =============================
-// CHANNEL LOCK (AI ONLY)
+// CHANNEL LOCK
 // =============================
 const AI_CHANNEL_NAME = "⌊📝⌉-thai-airways-ai";
 
 // =============================
-// SYSTEM (CUSTOMER SERVICE MODE)
+// SYSTEM PROMPT (CUSTOMER SERVICE)
 // =============================
 const SYSTEM = `
 You are Thai Airways Roblox Customer Service AI.
 
 ROLE:
-- You are a customer support assistant (NOT HR)
-- Help users with flights, tickets, and applications
+- Customer support assistant (NOT HR)
+- Help with flights, tickets, and applications
 
 RULES:
 - Do NOT invent flights
 - Use only database data
-- If unknown → suggest recruitment link or support
-
-BE PROFESSIONAL AND FRIENDLY
+- If unknown → guide user to support or recruitment site
 `;
 
 // =============================
-// READY EVENT
+// READY
 // =============================
 client.once("ready", () => {
     console.log("🤖 Customer Service AI Online");
 });
 
 // =============================
-// MESSAGE HANDLER
+// MESSAGE EVENT
 // =============================
 client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
 
     // =============================
-    // LOCK CHANNEL (AI ONLY)
+    // CHANNEL LOCK
     // =============================
     if (msg.channel.name !== AI_CHANNEL_NAME) return;
 
@@ -96,7 +94,7 @@ client.on("messageCreate", async (msg) => {
         : "NO INFO DATA";
 
     // =============================
-    // ✈ JOB / APPLICATION DETECTION
+    // ✈ JOB / APPLY SYSTEM
     // =============================
     const jobKeywords = [
         "สมัคร", "สมัครงาน", "อยากทำงาน",
@@ -104,31 +102,34 @@ client.on("messageCreate", async (msg) => {
         "job", "work", "พนักงาน", "airline"
     ];
 
-    const isJob = jobKeywords.some(k => text.includes(k));
-
-    if (isJob) {
+    if (jobKeywords.some(k => text.includes(k))) {
         return msg.reply(`
 ✈️ Thai Airways Roblox Recruitment
 
-คุณสามารถสมัครงานได้ที่:
+สมัครงานได้ที่:
 👉 https://recruitment.thai-airways.pattaramet.dev/
 
 📌 ขั้นตอน:
 1. กรอกใบสมัคร
-2. HR ตรวจสอบ
+2. รอการตรวจสอบ
 3. เข้ารับการอบรม
 4. ประกาศผล
 
-หากมีคำถามเพิ่มเติมสามารถสอบถามได้ครับ 😊
+หากมีคำถามสามารถสอบถามได้ครับ 😊
         `);
     }
 
     // =============================
-    // 🎫 TICKET SYSTEM (FIXED)
+    // 🎫 TICKET SYSTEM (SMART + FIXED)
     // =============================
     const isTicketChannel = msg.channel.name
         .toLowerCase()
         .startsWith("ticket");
+
+    // normalize กันพิมพ์ผิด
+    const normalized = text
+        .replace(/\s+/g, " ")
+        .replace(/rotal/g, "royal");
 
     const ticketKeywords = [
         "royal silk",
@@ -145,32 +146,35 @@ client.on("messageCreate", async (msg) => {
     ];
 
     const isTicketMessage = ticketKeywords.some(k =>
-        text.includes(k)
+        normalized.includes(k)
     );
 
+    // =============================
+    // MAIN TICKET REPLY
+    // =============================
     if (isTicketChannel && isTicketMessage) {
         return msg.reply(`
 🙏 ขอบคุณที่ติดต่อฝ่ายบริการลูกค้า Thai Airways Roblox
 
-เพื่อให้เจ้าหน้าที่ดำเนินการได้เร็วที่สุด กรุณาส่งข้อมูลดังนี้:
+เพื่อดำเนินการตรวจสอบการรับยศ กรุณาส่งข้อมูลดังนี้:
 
 1️⃣ หลักฐานการซื้อ (Screenshot / Receipt)
 2️⃣ ชื่อผู้ใช้ Roblox
 
-📌 หลังจากได้รับข้อมูลครบถ้วน
-เจ้าหน้าที่จะตรวจสอบและดำเนินการให้เร็วที่สุดครับ ✈️
+📌 เจ้าหน้าที่จะดำเนินการให้เร็วที่สุดครับ ✈️
         `);
     }
 
     // =============================
-    // TICKET FALLBACK (CATCH ALL)
+    // FALLBACK TICKET (กันหลุด)
     // =============================
     if (isTicketChannel) {
         if (
             text.includes("royal") ||
             text.includes("ยศ") ||
             text.includes("ซื้อ") ||
-            text.includes("รับ")
+            text.includes("silk") ||
+            text.includes("first")
         ) {
             return msg.reply(`
 🙏 รับเรื่องเรียบร้อยครับ
@@ -179,7 +183,7 @@ client.on("messageCreate", async (msg) => {
 1️⃣ หลักฐานการซื้อ
 2️⃣ Roblox username
 
-เจ้าหน้าที่จะดำเนินการให้เร็วที่สุด ✈️
+เจ้าหน้าที่จะตรวจสอบให้เร็วที่สุด ✈️
             `);
         }
     }
