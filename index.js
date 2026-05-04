@@ -4,13 +4,14 @@ const { Client, GatewayIntentBits } = require("discord.js");
 const OpenAI = require("openai");
 const express = require("express");
 const fs = require("fs");
+const path = require("path");
 const stringSimilarity = require("string-similarity");
 
 // =============================
-// SERVER
+// EXPRESS
 // =============================
 const app = express();
-app.get("/", (_, res) => res.send("Roblox Airline AI Online"));
+app.get("/", (_, res) => res.send("AI System Running"));
 app.listen(process.env.PORT || 3000);
 
 // =============================
@@ -33,7 +34,28 @@ const groq = new OpenAI({
 });
 
 // =============================
-// DATABASE
+// AUTO CREATE FILE SYSTEM (FIX MAIN ERROR)
+// =============================
+function ensureFile(filePath, fallback) {
+    const dir = path.dirname(filePath);
+
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+
+    if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, JSON.stringify(fallback, null, 2));
+    }
+}
+
+// CREATE ALL FILES SAFE
+ensureFile("./data/knowledge.json", []);
+ensureFile("./data/flights.json", []);
+ensureFile("./data/benefits.json", []);
+ensureFile("./data/memory.json", {});
+
+// =============================
+// DB
 // =============================
 const DB = {
     kb: [],
@@ -42,16 +64,25 @@ const DB = {
     memory: {}
 };
 
-function loadDB() {
-    DB.kb = JSON.parse(fs.readFileSync("./data/knowledge.json", "utf8") || "[]");
-    DB.flights = JSON.parse(fs.readFileSync("./data/flights.json", "utf8") || "[]");
-    DB.benefits = JSON.parse(fs.readFileSync("./data/benefits.json", "utf8") || "[]");
-
+// =============================
+// SAFE READ
+// =============================
+function safeRead(file, fallback) {
     try {
-        DB.memory = JSON.parse(fs.readFileSync("./data/memory.json", "utf8"));
+        return JSON.parse(fs.readFileSync(file, "utf8"));
     } catch {
-        DB.memory = {};
+        return fallback;
     }
+}
+
+// =============================
+// LOAD DB
+// =============================
+function loadDB() {
+    DB.kb = safeRead("./data/knowledge.json", []);
+    DB.flights = safeRead("./data/flights.json", []);
+    DB.benefits = safeRead("./data/benefits.json", []);
+    DB.memory = safeRead("./data/memory.json", {});
 }
 
 function saveMemory() {
@@ -62,7 +93,7 @@ loadDB();
 setInterval(loadDB, 30000);
 
 // =============================
-// MEMORY SYSTEM
+// MEMORY
 // =============================
 function remember(userId, key, value) {
     if (!DB.memory[userId]) DB.memory[userId] = {};
@@ -75,7 +106,7 @@ function recall(userId, key) {
 }
 
 // =============================
-// TIME SYSTEM (TH + GLOBAL)
+// TIME
 // =============================
 function getTime() {
     const now = new Date();
@@ -85,38 +116,32 @@ function getTime() {
             timeZone: "Asia/Bangkok",
             dateStyle: "full",
             timeStyle: "medium"
-        }).format(now),
-        japan: new Intl.DateTimeFormat("ja-JP", {
-            timeZone: "Asia/Tokyo",
-            dateStyle: "full",
-            timeStyle: "medium"
-        }).format(now),
-        utc: now.toUTCString()
+        }).format(now)
     };
 }
 
 // =============================
-// INTENT DETECTION (SMART FUZZY)
+// INTENT DETECTION
 // =============================
 function detectIntent(text) {
     const t = text.toLowerCase();
 
     const map = {
-        job: ["สมัคร", "งาน", "pilot", "crew", "แอร์", "นักบิน", "hr", "career"],
-        flight: ["เที่ยวบิน", "flight", "บิน", "tg", "schedule", "วัน", "เวลา"],
+        job: ["สมัคร", "งาน", "pilot", "crew", "แอร์", "นักบิน", "hr"],
+        flight: ["เที่ยวบิน", "flight", "บิน", "tg", "วันนี้", "พรุ่งนี้"],
         benefit: ["royal", "สิทธิ", "benefit", "สวัสดิการ"],
-        time: ["เวลา", "time", "กี่โมง", "ประเทศ"]
+        time: ["เวลา", "กี่โมง", "date"]
     };
 
-    for (const key in map) {
-        if (map[key].some(w => t.includes(w))) return key;
+    for (const k in map) {
+        if (map[k].some(w => t.includes(w))) return k;
     }
 
     return "ai";
 }
 
 // =============================
-// KB SEARCH (FUZZY)
+// KB SEARCH
 // =============================
 function findKB(text) {
     if (!DB.kb.length) return null;
@@ -130,7 +155,7 @@ function findKB(text) {
 }
 
 // =============================
-// FLIGHT SYSTEM (FULL LOGIC)
+// FLIGHT SEARCH (SAFE)
 // =============================
 function findFlights(text) {
     const today = new Date().toISOString().split("T")[0];
@@ -154,17 +179,6 @@ function findFlights(text) {
 }
 
 // =============================
-// GLOBAL JOB DETECTOR (ALL CHANNELS)
-// =============================
-function isJob(text) {
-    const t = text.toLowerCase();
-    return [
-        "สมัคร", "งาน", "pilot", "นักบิน",
-        "แอร์", "crew", "hr", "career"
-    ].some(w => t.includes(w));
-}
-
-// =============================
 // CHANNEL LOCK
 // =============================
 const AI_CHANNEL = "⌊📝⌉-thai-airways-ai";
@@ -177,7 +191,7 @@ client.once("ready", () => {
 });
 
 // =============================
-// MESSAGE EVENT
+// MESSAGE
 // =============================
 client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
@@ -187,7 +201,7 @@ client.on("messageCreate", async (msg) => {
     const userId = msg.author.id;
 
     // =============================
-    // MEMORY NAME
+    // NAME MEMORY
     // =============================
     if (t.includes("ผมชื่อ") || t.includes("ฉันชื่อ")) {
         const name = text.split("ชื่อ")[1]?.trim();
@@ -198,20 +212,18 @@ client.on("messageCreate", async (msg) => {
     }
 
     // =============================
-    // JOB SYSTEM (GLOBAL)
+    // JOB AUTO (ALL CHANNELS)
     // =============================
-    if (isJob(t)) {
+    if (["สมัคร", "งาน", "pilot", "crew", "นักบิน", "แอร์"].some(w => t.includes(w))) {
         return msg.reply(`
 ✈️ สมัครงาน Thai Airways Roblox
 
-🔗 https://recruitment.thai-airways.pattaramet.dev/
+https://recruitment.thai-airways.pattaramet.dev/
 
-ขั้นตอน:
 1. สมัคร
 2. HR ตรวจสอบ
 3. สัมภาษณ์
 4. ฝึกงาน
-5. เข้าทำงาน
 `);
     }
 
@@ -229,11 +241,7 @@ client.on("messageCreate", async (msg) => {
     if (intent === "flight") data = findFlights(t);
     if (intent === "benefit") data = DB.benefits.find(b => t.includes(b.key));
     if (intent === "time") {
-        return msg.reply(`
-🇹🇭 ไทย: ${time.thailand}
-🇯🇵 ญี่ปุ่น: ${time.japan}
-🌍 UTC: ${time.utc}
-`);
+        return msg.reply(`🇹🇭 เวลาไทย: ${time.thailand}`);
     }
 
     const kb = findKB(t);
@@ -250,21 +258,19 @@ client.on("messageCreate", async (msg) => {
             {
                 role: "system",
                 content: `
-You are Roblox Airline AI System.
+You are Roblox Airline AI.
 
 RULES:
-- ONLY use internal database
+- ONLY internal data
 - NEVER use real-world airline data
-- NEVER mention Thai Airways real-world info
 - If no data → "ไม่มีข้อมูลในระบบ"
-- Keep responses short
 
 USER: ${name}
 
 KB:
 ${kb ? kb.answer : "NONE"}
 
-FLIGHT:
+FLIGHTS:
 ${data ? JSON.stringify(data) : "NONE"}
 `
             },
